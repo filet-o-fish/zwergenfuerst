@@ -1,3 +1,53 @@
+// -----------------------------------------------------------------
+//
+// Wurzelimperium Wimp3-Preischeck (Clone of Wurzelimperium Wimp2-Preischeck)
+// V. 0.97
+// Date: 2009-01-30
+// mod: 20110627 olobex: (fixed getIDs, fixed colorize outdated overview, added colored link in recent offer page, added colorize overprized overview )
+// mod: 20110629 olobex: (fixed getIDs Umlaute)
+// mod: 20110703 olobex: (added scanAllProducts to market overview)
+// mod: 20110705 olobex: (fixed bestprice parseint missing ,10 in scan())
+// mod: 20120325 olobex: (fixed wimp verkauf, TODO: add back in update from Sammelstelle)
+// mod: 20120403 olobex: (fixed Variable Injection for wimp verkauf: top.window...)
+// mod: 20120902 olobex: (fixed getNPCcosts, table now found again)
+// mod: 20130810 fof: (fixed scanAllProducts, fixed paintExp, added @grant, modified addconfdefaults)
+//
+// -----------------------------------------------------------------
+//
+// Dieses Script ermittelt die Preise der Pflanzen und vergleicht
+// sie mit dem Angebot der Wimps.
+//
+// Zunächst sind die Ausgangspreise die NPC-Preise, doch mit
+// Abrufen des Marktplatzes wird der Marktpreis verwendet.
+// Dazu wird der Mittelwert der ersten drei Angebote einer Pflanze
+// ermittelt und gespeichert.
+//
+// Werden die NPC-Preise verwendet, so errechnet sich der Bezugs-
+// preis wie folgt: (NPCPreis - 0,01)*0,9
+// Dies entspricht dem Reingewinn, würde man die Pflanzen für
+// 0,01 wT weniger als dem NPC-Preis am Markt verkaufen.
+//
+// Werden die Marktpreise verwendet, so wird lediglich die Markt-
+// gebühr abgezogen. Demnach ist der Bezugspreis: Marktpreis*0,9
+//
+// Zusätzlich ist das Script in der Lage Daten an einen Sammel-
+// server zu senden und auch komplette serverbezogene Daten
+// vom Sammelserver zu beziehen. Die Aktualisierung erfolgt
+// nach Betätigung des Updatelinks durch den User.
+//
+// Es werden keine User-relevanten Daten versendet!
+//
+// -----------------------------------------------------------------
+//
+// Vorgehensweise:
+//
+// 1. Script installieren
+// 2. Marktplatz Produktübersicht aufrufen
+// 3. Hilfe (Register Pflanzen) aufrufen
+// 4. Pflanzen am Markt aufrufen (1. Seite jeder Pflanze)
+// 5. Im Wimp-Verkaufsfenster bei Bedarf grünes Updateicon anklicken
+//
+// -----------------------------------------------------------------
 // ==UserScript==
 // @name        Zwergenfürst
 // @description Kopie von Wurzelimperium Wimp2-Preischeck
@@ -16,6 +66,305 @@
 // @version     1
 // ==/UserScript==
 
+/************************************************************
+ ***                                                       ***
+ ***                       Ladeschutz                      ***
+ ***                                                       ***
+ *** Von nun an wird das Script auf jeder Seite geladen,   ***
+ *** doch zuvor wird geschaut, ob das Script auf dieser    ***
+ *** benötigt wird. Dies wird getan, damit die schnelle    ***
+ *** Implementierung auch auf nicht-deutschen Seiten       ***
+ *** gewährleistet wird.                                   ***
+ ***                                                       ***
+ ************************************************************/
+
+var country, server, page, subpage;
+//searchSpec = /^http:\/\/[a-zA-Z]*(\d+)\.([-a-zA-Z0-9_]{1,3}\.)?([-a-zA-Z0-9_]+)\.([a-zA-Z\.]{2,5})\/(.*?)(markt|verkauf|hilfe|main|overview|garten_map)\.php/;
+searchSpec = /^http:\/\/[a-zA-Z]*(\d+)\.([-a-zA-Z0-9_]{1,3}\.)?([-a-zA-Z0-9_]+)\.([a-zA-Z\.]{2,5})\/(.*?)(markt|verkauf|verkauf_map|hilfe|main|overview|garten_map)\.php/;
+//alert("oli: href="+window.location.href);
+//alert("oli: referer="+document.referrer);
+//alert("oli: referer="+document.referrer+" loc="+window.location.href);
+sitedata = searchSpec.exec(window.location.href);
+if(sitedata != null) {
+    if(sitedata[3] == "bahcivanlardiyari") {
+        // Gibts keine t?rkische Domain?
+        country = "tr";
+    }
+    else if(sitedata[2] != undefined) {
+        country = sitedata[2].substr(0, sitedata[2].length-1).replace(".","_");
+    }
+    else {
+        country = sitedata[4];
+    }
+    server  = parseInt(sitedata[1], 10);
+    page    = sitedata[5];
+    subpage = sitedata[6];
+//  alert("oli: subpage="+subpage);
+
+// Notiz: Die Einrückung erfolgt hier nicht
+
+    /************************************************************
+     ***                                                       ***
+     ***                  Typen-Definitionen                   ***
+     ***                                                       ***
+     *** JSON: Benötigt für Datentransfer und Speicherung      ***
+     *** Number: Einheitliche Geld-Formatierung                ***
+     ***                                                       ***
+     ************************************************************/
+
+    Array.prototype.______array='______array';var JSON={org:'http://www.JSON.org',copyright:'(c)2005 JSON.org',license:'http://www.crockford.com/JSON/license.html',stringify:function(arg){var c,i,l,s='',v;switch(typeof arg){case'object':if(arg){if(arg.______array=='______array'){for(i=0;i<arg.length;++i){v=this.stringify(arg[i]);if(s){s+=','}s+=v}return'['+s+']'}else if(typeof arg.toString!='undefined'){for(i in arg){v=arg[i];if(typeof v!='undefined'&&typeof v!='function'){v=this.stringify(v);if(s){s+=','}s+=this.stringify(i)+':'+v}}return'{'+s+'}'}}return'null';case'number':return isFinite(arg)?String(arg):'null';case'string':l=arg.length;s='"';for(i=0;i<l;i+=1){c=arg.charAt(i);if(c>=' '){if(c=='\\'||c=='"'){s+='\\'}s+=c}else{switch(c){case'\b':s+='\\b';break;case'\f':s+='\\f';break;case'\n':s+='\\n';break;case'\r':s+='\\r';break;case'\t':s+='\\t';break;default:c=c.charCodeAt();s+='\\u00'+Math.floor(c/16).toString(16)+(c%16).toString(16)}}}return s+'"';case'boolean':return String(arg);default:return'null'}},parse:function(text){var at=0;var ch=' ';function error(m){throw{name:'JSONError',message:m,at:at-1,text:text}}function next(){ch=text.charAt(at);at+=1;return ch}function white(){while(ch!==''&&ch<=' '){next()}}function str(){var i,s='',t,u;if(ch=='"'){outer:while(next()){if(ch=='"'){next();return s}else if(ch=='\\'){switch(next()){case'b':s+='\b';break;case'f':s+='\f';break;case'n':s+='\n';break;case'r':s+='\r';break;case't':s+='\t';break;case'u':u=0;for(i=0;i<4;i+=1){t=parseInt(next(),16);if(!isFinite(t)){break outer}u=u*16+t}s+=String.fromCharCode(u);break;default:s+=ch}}else{s+=ch}}}error("Bad string")}function arr(){var a=[];if(ch=='['){next();white();if(ch==']'){next();return a}while(ch){a.push(val());white();if(ch==']'){next();return a}else if(ch!=','){break}next();white()}}error("Bad array")}function obj(){var k,o={};if(ch=='{'){next();white();if(ch=='}'){next();return o}while(ch){k=str();white();if(ch!=':'){break}next();o[k]=val();white();if(ch=='}'){next();return o}else if(ch!=','){break}next();white()}}error("Bad object")}function num(){var n='',v;if(ch=='-'){n='-';next()}while(ch>='0'&&ch<='9'){n+=ch;next()}if(ch=='.'){n+='.';while(next()&&ch>='0'&&ch<='9'){n+=ch}}if(ch=='e'||ch=='E'){n+='e';next();if(ch=='-'||ch=='+'){n+=ch;next()}while(ch>='0'&&ch<='9'){n+=ch;next()}}v=+n;if(!isFinite(v)){error("Bad number")}else{return v}}function word(){switch(ch){case't':if(next()=='r'&&next()=='u'&&next()=='e'){next();return true}break;case'f':if(next()=='a'&&next()=='l'&&next()=='s'&&next()=='e'){next();return false}break;case'n':if(next()=='u'&&next()=='l'&&next()=='l'){next();return null}break}error("Syntax error")}function val(){white();switch(ch){case'{':return obj();case'[':return arr();case'"':return str();case'-':return num();default:return ch>='0'&&ch<='9'?num():word()}}return val()}};Number.prototype.toMoney=function(){if(arguments.length==2){var thD=arguments[0],flD=arguments[1]}else{var thD='.',flD=','}var reply='',tmpNum;tmpNum=Math.round(this*100)/100;reply=tmpNum.toFixed(2).toString();fullNum=reply.substring(0,reply.indexOf('.'));flNum=reply.substring(reply.indexOf('.')+1,reply.length);reply='';while(fullNum.length>3){reply=thD+fullNum.substring(fullNum.length-3,fullNum.length)+reply;fullNum=fullNum.substring(0,fullNum.length-3)}reply=fullNum+reply+flD+flNum;return reply};
+
+    /************************************************************
+     ***                                                       ***
+     ***                         Bilder                        ***
+     ***                                                       ***
+     *** Bilder benötigt für Updateanzeige und evtl. Menü      ***
+     *** später                                                ***
+     ***                                                       ***
+     ************************************************************/
+
+    updateS       = 'data:image/jpeg;base64,%2F9j%2F4AAQSkZJRgABAQIAIQAgAAD%2F2wBDAAEBAQEBAQEBAQEBAQECAgMCAgICAgQDAwIDBQQFBQUEBAQFBgcGBQUHBgQEBgkGBwgICAgIBQYJCgkICgcICAj%2F2wBDAQEBAQICAgQCAgQIBQQFCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAj%2FwAARCAAOAA4DAREAAhEBAxEB%2F8QAFwAAAwEAAAAAAAAAAAAAAAAAAAQGCf%2FEACMQAAEDBAICAwEAAAAAAAAAAAECAwQFBgcREiEACBMUMTL%2FxAAZAQACAwEAAAAAAAAAAAAAAAADCQIEBQb%2FxAAmEQACAQMEAQUAAwAAAAAAAAABAhEDBAUABhIhMQcTFCJBUWFx%2F9oADAMBAAIRAxEAPwDcOzMd4qgY7xhlbN0mtV2r3tdrMZhz7KmYlOpkaeyie%2FJUkhalLb%2BVsaI4hYKdEcglDbey9vUMNj8%2FuhmqVMjchQeRCpRp1lFw7kHkSy8lEEEKQQOtLFwO2MPSxlplM8S7XdYAdkKtNKiiqWI%2BxLKSOiIEEeNHsrS7Jx2jFuSPXJp%2BzseXTTZf1kpdlGQ4uM%2BG3PmL7zuxspKeIQACQQo9%2BT9bMficR8DO7LBoWV7TfiJqcyab8W5%2B5Uf9iI4%2F3J70T1Ox2PsPiZPbQ9q2uVaB9%2BUo0GeTt14iI%2FZk96lrbzPDxfQ6lhHK%2BMrYzTZNPqK5UBh6W7Bdpz5%2FssPtp5JQrolGv3feiR5zu3%2FU6jhLOptbcFil%2Fa0qhZAXZGRj5KVF%2BwDGCRHnWRht7JjrZ8DmLRLu3RuSgsyFSfPFl7gwJEaUuK47h9qLjgwokK3ceWlbtNTEo9IiIWpiAwVDaQeipSiNqWdb0ka68r5%2FO3u%2B7xadFEtra2QLSpLPFFJ8D9JJ7LGCetBzOZudy3CqqrRo0FCoizCie%2F8AST2T1P8AGv%2FZ';
+    updateM       = 'data:image/jpeg;base64,%2F9j%2F4AAQSkZJRgABAQIAIQAgAAD%2F2wBDAAEBAQEBAQEBAQEBAQECAgMCAgICAgQDAwIDBQQFBQUEBAQFBgcGBQUHBgQEBgkGBwgICAgIBQYJCgkICgcICAj%2F2wBDAQEBAQICAgQCAgQIBQQFCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAj%2FwAARCAAOAA4DAREAAhEBAxEB%2F8QAFwAAAwEAAAAAAAAAAAAAAAAAAwUGB%2F%2FEACIQAAEEAgICAwEAAAAAAAAAAAECAwQFBgcIEQASCSEiFP%2FEABoBAAEFAQAAAAAAAAAAAAAAAAQBAgMGCAn%2FxAAnEQABAwMEAAYDAAAAAAAAAAABAgMRBAUGABIhMQcyQVFhgRMiof%2FaAAwDAQACEQMRAD8AutV6N43UmjePXIzlzOyjLck23suPXxHVWDkWvosfgXMZq5lz3GiHVqdYMlkepSUBwKT%2BgFDLNutVEimYrK4FRfWAPYJCgFk8z1I%2BO9d4srznJX77csdxEIabtlMpSv1BU486ws06EBQ2gJVtUZBCiIJgwS8%2Bca1BpNvjvvzgtCl6v0dsaitP4WRIsjOeegzUsvmUZkuQSPZSC36BsAKUCFH9eJldLTsJZqrXKGXQY80kpMGZJ%2Bojv10zwBvF4vBuNgzsiprqFbe6Q3sAdRvRs%2FG2iOJB3FXoRA41nOv%2BV1ToDDr%2FAIkckeP%2BB8sdQ0t69ZU8OXayaiTSTFjp1USawkrS050lSmyk%2Fff3%2Bj4FQ39unaNBVNB5tJkSSkgnuCJ79tWXJ%2FCd%2B%2BVreXY1cHLdWPNhKyEIcS4keULbVCSU8gGevkaV55nmc%2FIpnVPVVVPgekNa4RQorcXxatacVDpYanAVJQevZx1au1LdV0T0kdfXkr7zt4eASA2htMJSOgJ%2FvydE45jlD4f0K3XVuVVTVObnXVRuWqOz6AAcJSJA5%2B%2F%2F2Q%3D%3D';
+    menuB         = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8%2F9hAAAAAXNSR0IArs4c6QAAAAZiS0dEAMIAYwAgG2lVdQAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB9kBGAMDA%2BFKDacAAAAIdEVYdENvbW1lbnQA9syWvwAAAuNJREFUOMtlk09oXHUQxz%2Fz%2B70%2FZnfdJjU9CSGo0KIEkhJIqtYWWk0VlIDiIYtFKZVaevAgNSgeVATxJBYPhWJA2XoxkECVrbaH9CCKui0UMaUsXUvTWpOySbrpvvf2vd94aBJSO7cZ5g%2FznfkI%2F7PTY%2BGQwjgiowKAoDiAKUE%2BHSlHv27Ml41OZSysGvEGrNeh1oQiWFQUdSmZizTLIlHc%2BX3lePtajVmfXArrns31h%2BFmzl0ViTPL8T8WWY6Uj2eWCLxNUlssYMTvr5TC%2Bj0NKqWw6pmOnlOXRaZnV9iSs%2FxwuUmcKsUHLFu7Q6432xz%2Bfp7Q7xIjXk%2BlFFYBpDIWDhnj%2FRIGDwHCqUtNXtz2IBdutJipr9Cd93lpa55CYBG5u3GWxcRJAxGGPWDc2g4VMZI65cpiwu6v%2Fsaprmtz%2FLcGnoFXnijy5mAXngkw1lfnknGDyKg1gczOx%2ByfnKPWyvP7zzOoKs450jRFVfnsow9wquyfnGN2IcFKIMCoJ0Crbbi2HPH%2Brm563%2FicgeGdfHNyksPHlrBGOHakk7ff%2B5Cj1bMcGbrO2VqThwsGK6siBhb2PpLn4s2EwZ17AJj4KcW5jLazTPwYIyIUtj0NwJ5HCwR29QqqoJqCCFtyhqX5GwBssnPYzYPYzj6Kcjdmbt9c18VpunZGnWolkZ6pNdnRk%2BPriROoKuUvDvHuc5c4%2BuxffPvlIW79M8ed2XOoKmdqTaJ2rAJT9rU%2Bv25NdjAj5J3T86TXLnKrGfPU7r3serKPZ3b00Wws8NarzxO2%2FuWTmQVeeMynO5eIIK%2FL2iMZ4%2Fcb0yknqst89%2BcyqbuXEd%2FCy48XOTCQx2UNRbkwcjLavs5CpRTWjXg9vlcUawNSB1caCYLQ2%2BVjBbLsDu30tip6dV857r0fplJYFWTAGF%2BNBCLGA1WcpjgXq9NUBDk%2FUo7uhwlglbLhzCXT7bRJkiySpEuk2Qqq6bSIDG8sBvgPA2JAyp93NCUAAAAASUVORK5CYII%3D';
+    symb_contract = 'data:image/gif;base64,R0lGODlhBwAHAPcAAAAAAIAAAACAAICAAAAAgIAAgACAgICAgMDAwP8AAAD%2FAP%2F%2FAAAA%2F%2F8A%2FwD%2F%2F%2F%2F%2F%2FwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMwAAZgAAmQAAzAAA%2FwAzAAAzMwAzZgAzmQAzzAAz%2FwBmAABmMwBmZgBmmQBmzABm%2FwCZAACZMwCZZgCZmQCZzACZ%2FwDMAADMMwDMZgDMmQDMzADM%2FwD%2FAAD%2FMwD%2FZgD%2FmQD%2FzAD%2F%2FzMAADMAMzMAZjMAmTMAzDMA%2FzMzADMzMzMzZjMzmTMzzDMz%2FzNmADNmMzNmZjNmmTNmzDNm%2FzOZADOZMzOZZjOZmTOZzDOZ%2FzPMADPMMzPMZjPMmTPMzDPM%2FzP%2FADP%2FMzP%2FZjP%2FmTP%2FzDP%2F%2F2YAAGYAM2YAZmYAmWYAzGYA%2F2YzAGYzM2YzZmYzmWYzzGYz%2F2ZmAGZmM2ZmZmZmmWZmzGZm%2F2aZAGaZM2aZZmaZmWaZzGaZ%2F2bMAGbMM2bMZmbMmWbMzGbM%2F2b%2FAGb%2FM2b%2FZmb%2FmWb%2FzGb%2F%2F5kAAJkAM5kAZpkAmZkAzJkA%2F5kzAJkzM5kzZpkzmZkzzJkz%2F5lmAJlmM5lmZplmmZlmzJlm%2F5mZAJmZM5mZZpmZmZmZzJmZ%2F5nMAJnMM5nMZpnMmZnMzJnM%2F5n%2FAJn%2FM5n%2FZpn%2FmZn%2FzJn%2F%2F8wAAMwAM8wAZswAmcwAzMwA%2F8wzAMwzM8wzZswzmcwzzMwz%2F8xmAMxmM8xmZsxmmcxmzMxm%2F8yZAMyZM8yZZsyZmcyZzMyZ%2F8zMAMzMM8zMZszMmczMzMzM%2F8z%2FAMz%2FM8z%2FZsz%2Fmcz%2FzMz%2F%2F%2F8AAP8AM%2F8AZv8Amf8AzP8A%2F%2F8zAP8zM%2F8zZv8zmf8zzP8z%2F%2F9mAP9mM%2F9mZv9mmf9mzP9m%2F%2F%2BZAP%2BZM%2F%2BZZv%2BZmf%2BZzP%2BZ%2F%2F%2FMAP%2FMM%2F%2FMZv%2FMmf%2FMzP%2FM%2F%2F%2F%2FAP%2F%2FM%2F%2F%2FZv%2F%2Fmf%2F%2FzP%2F%2F%2FyH5BAEAABAALAAAAAAHAAcAAAgeAP9x4%2Fav4D8%2BphAqNKWvYcOEDhsijKgPYsSFCwMCADs%3D';
+    symb_market   = 'data:image/gif;base64,R0lGODlhBwAHAPcAAAAAAIAAAACAAICAAAAAgIAAgACAgICAgMDAwP8AAAD%2FAP%2F%2FAAAA%2F%2F8A%2FwD%2F%2F%2F%2F%2F%2FwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMwAAZgAAmQAAzAAA%2FwAzAAAzMwAzZgAzmQAzzAAz%2FwBmAABmMwBmZgBmmQBmzABm%2FwCZAACZMwCZZgCZmQCZzACZ%2FwDMAADMMwDMZgDMmQDMzADM%2FwD%2FAAD%2FMwD%2FZgD%2FmQD%2FzAD%2F%2FzMAADMAMzMAZjMAmTMAzDMA%2FzMzADMzMzMzZjMzmTMzzDMz%2FzNmADNmMzNmZjNmmTNmzDNm%2FzOZADOZMzOZZjOZmTOZzDOZ%2FzPMADPMMzPMZjPMmTPMzDPM%2FzP%2FADP%2FMzP%2FZjP%2FmTP%2FzDP%2F%2F2YAAGYAM2YAZmYAmWYAzGYA%2F2YzAGYzM2YzZmYzmWYzzGYz%2F2ZmAGZmM2ZmZmZmmWZmzGZm%2F2aZAGaZM2aZZmaZmWaZzGaZ%2F2bMAGbMM2bMZmbMmWbMzGbM%2F2b%2FAGb%2FM2b%2FZmb%2FmWb%2FzGb%2F%2F5kAAJkAM5kAZpkAmZkAzJkA%2F5kzAJkzM5kzZpkzmZkzzJkz%2F5lmAJlmM5lmZplmmZlmzJlm%2F5mZAJmZM5mZZpmZmZmZzJmZ%2F5nMAJnMM5nMZpnMmZnMzJnM%2F5n%2FAJn%2FM5n%2FZpn%2FmZn%2FzJn%2F%2F8wAAMwAM8wAZswAmcwAzMwA%2F8wzAMwzM8wzZswzmcwzzMwz%2F8xmAMxmM8xmZsxmmcxmzMxm%2F8yZAMyZM8yZZsyZmcyZzMyZ%2F8zMAMzMM8zMZszMmczMzMzM%2F8z%2FAMz%2FM8z%2FZsz%2Fmcz%2FzMz%2F%2F%2F8AAP8AM%2F8AZv8Amf8AzP8A%2F%2F8zAP8zM%2F8zZv8zmf8zzP8z%2F%2F9mAP9mM%2F9mZv9mmf9mzP9m%2F%2F%2BZAP%2BZM%2F%2BZZv%2BZmf%2BZzP%2BZ%2F%2F%2FMAP%2FMM%2F%2FMZv%2FMmf%2FMzP%2FM%2F%2F%2F%2FAP%2F%2FM%2F%2F%2FZv%2F%2Fmf%2F%2FzP%2F%2F%2FywAAAAABwAHAAAIIwAfPBhAUODABAkWDBi4IGFCgg0TKhzQsOLCAQgVGiS48EFAADs%3D';
+
+    /************************************************************
+     ***                                                       ***
+     ***                       Locales                         ***
+     ***                                                       ***
+     ************************************************************/
+
+    var locales = {
+        "de" : {
+            "updatenotice"              : 'Update vorhanden!\nBitte herunterladen und installieren! Der Downloadlink befindet sich im\nWIMPer-Menu.',
+            "updatereloadnotice"        : 'Nach dem Update bitte die Seite neu laden.\nDanke.',
+            "wimpnotallplantsknown"     : 'Nicht alle PflanzenIDs bekannt.\nBitte den Marktplatz aufsuchen und die ProduktÃ¼bersicht aufrufen.',
+            "wimpnotallcostsknown"      : 'Nicht alle NPC-Preise bekannt.\nBitte die PflanzenÃ¼bersicht in der Hilfe aufrufen.',
+            "market"                    : 'Markt',
+            "questiongetdbupdate"       : 'Daten von der Sammelstelle holen?',
+            "dbupdatemarketrecommend"   : 'Es werden neuere Daten vom Marktplatz empfohlen!',
+            "comesupto"                 : 'Entspricht',
+            "ofthecosts"                : 'der Kosten.',
+            "costs"                     : 'Kosten',
+            "moneyunit"                 : 'wT',
+            "contractcutplants"         : 'Warnung: Gegenst&auml;nde abgek&uuml;rzt!!',
+            "missing"                   : 'Fehlt',
+            "allonstock"                : 'Alles auf Lager',
+            "helpnotallplantsknown"     : 'Nicht alle PflanzenIDs bekannt.\nBitte den Marktplatz aufsuchen und die ProduktÃ¼bersicht aufrufen.\nHast du das schon getan, ignoriere diese Meldung.',
+            "updatelinktitle"           : 'WIMPer Update liegt vor! Hier herunterladen.',
+            "questionshowupdatenotice"  : '(Bei Datenempfang/-versand evtl. Updateinfos anzeigen?)',
+            "costssent"                 : 'WIMPer: Preis gesendet. Danke!',
+            "sendfailed"                : 'WIMPer: Fehler bei der &Uuml;bertragung!',
+            "erroroccured"              : 'Ein Fehler ist aufgetreten!',
+            "helpwelcome"               : 'Herzlich Willkommen in der Hilfe zu WIMPer. Hier erf&auml;hrst du alles, was du im Umgang mit WIMPer wissen musst.',
+            "helpbeginning"             : '<b>Aller Anfang...</b><br>... ist leicht. WIMPer ist so gebaut, dass es auch mit neuen, noch unbekannten Pflanzen arbeiten kann. Deshalb ist es notwendig anfangs einmalig die Produkt&uuml;bersicht auf dem Marktplatz abzurufen, damit WIMPer alle Pflanzen kennenlernt. <br>Anschlie&szlig;end muss WIMPer noch die NPC-Preise f&uuml;r die Pflanzen in Erfahrung bringen. Dies geschieht, indem du hier in der Hilfe die <a href="hilfe.php?item=2">Pflanzenseite</a> abrufst.<br>Diese beiden Schritte sind nur dann erneut notwendig, sollten neue Pflanzen in das Spiel eingef&uuml;gt werden.',
+            "helpmarketplaceoverview"   : '<b>Marktplatz - Produkt&uuml;bersicht</b><br>Hier werden dir Pflanzen, die du bereits einmal abgerufen hast, deren Daten in deiner Datenbank aber momentan veraltet sind, gelb angezeigt. (Diese Option kann in der Konfiguration deaktiviert werden.)',
+            "helpmarketplace"           : '<b>Marktplatz</b><br>Wenn du eine Pflanze im Marktplatz abrufst, wird der Mittelwert der drei g&uuml;nstigsten Angebote gebildet und in deiner Datenbank gespeichert. Zudem werden diese Daten an eine Sammelstelle gesendet, damit andere User nicht immer auf den Marktplatz gehen m&uuml;ssen um die neuesten Preise zu erfahren. Genauso profitierst du von den Preisen von den anderen. Pro Pflanze k&ouml;nnen die Daten nur einmal alle 10 Minuten gesendet werden um den Infoserver nicht zu &uuml;berlasten. (Diese Option kann in der Konfiguration deaktiviert werden.)',
+            "helpwimpinfo"              : '<b>Wimp-Info</b><br>Um schneller erkennen zu k&ouml;nnen, ob alle Pflanzen f&uuml;r den Verkauf an einen Wimp vorhanden sind, wird bei Mausber&uuml;hrung mit dem Wimp nicht nur angezeigt, was er alles kaufen m&ouml;chte, sondern auch, ob du schon alles zusammen hast, oder ob noch etwas fehlt. Dabei werden neuerdings auch die Pflanzen mit einbezogen, die du dir selbst als <b>Vertrag</b> zugesendet hast.<br>Siehst du vor einer ben&ouml;tigten Pflanze das Symbol <img id="wimper_info_contract">, bedeutet das, dass du diese Pflanze noch in einem Vertrag hast, den du aufl&ouml;sen solltest. Zudem zeigt dir das Symbol <img id="wimper_info_market">, dass du noch weitere dieser Pflanzen kaufen, oder anbauen musst.<br><b>-&gt;WICHTIG!&lt;-</b><br>Vertr&auml;ge d&uuml;rfen dabei nicht zu viele Pflanzen enthalten. Enth&auml;lt ein Vertrag so viele Gegenst&auml;nde, dass die Auflistung in der Vertr&auml;ge&uuml;bersicht mit "..." abgek&uuml;rzt wird, k&ouml;nnen die nicht genannten Pflanzen leider nicht erkannt werden!',
+            "helpwimpsale"              : '<b>Wimp-Verkauf</b><br>Willst du etwas an die Wimps verkaufen, siehst du nun zus&auml;tzlich zu der angebotenen Summe auch den Preis, den du auf dem Markt erzielen w&uuml;rdest. Diese sind als Kosten ausgeschildert. Zus&auml;tzlich kannst du die Kosten zu jedem einzelnen Produkt sehen, wenn du mit der Maus &uuml;ber sie f&auml;hrst. &Uuml;ber der Angebotssumme wird bei Mausber&uuml;hrung der prozentuale Wert des Angebot in Relation zu den Kosten angezeigt. &Uuml;bertrifft das Angebot den von dir in der Konfiguration festgelegten Prozentsatz, wird er in lila angezeigt. Ist es h&ouml;her als 100%, erscheint es in gr&uuml;n und ansonsten in rot.',
+            "helpupdate"                : '<b>Aktualisierung</b><br>Solltest du im Angebotsfenster der Wimps sein und deine Marktpreisdaten sind veraltet, gibt es zwei Aktualisierungsm&ouml;glichkeiten.<br>Die Serveraktualisierung wird dir durch einen gr&uuml;nes Symbol hinter dem Angebotsposten dargestellt und kann vollzogen werden, indem du es anklickst. Dabei wird von einer Sammelstelle ein Datensatz heruntergeladen, damit deine Daten auf dem neuesten Stand gehalten werden. Eine Aktualisierung von der Sammelstelle ist pro Server nur jede Stunde m&ouml;glich um den Infoserver nicht zu &uuml;berlasten. (Diese Option kann in der Konfiguration deaktiviert werden.)<br>Die Marktaktualisierung wird dir durch ein rotes Symbol hinter dem Angebotsposten signalisiert. Du siehst sie, wenn deine Daten &auml;lter als eine Stunde sind, ein Sammelstellenupdate aber (noch) nicht in Frage kommt. Dies bedeutet, du solltest im Marktplatz selbst einmal diese Pflanze abrufen, damit die Daten aktualisiert werden, wie oben beschrieben.',
+            "helpcostprotection"        : '<b>Preisschutz</b><br>Die Angebote auf dem Marktplatz, die teurer als auf dem Bauernhof, in der Baumschule oder im Blumenladen sind, werden rot eingef&auml;rbt. (Diese Option kann in der Konfiguration deaktiviert werden.)',
+            "helpgardeninfo"            : '<b>Garten-Info</b><br>&Uuml;ber dem Regal findest du eine Zusammenfassung &uuml;ber den aktuellen Garten. Dabei wird dir angezeigt, wann du deine Pflanzen das n&auml;chste mal w&auml;ssern und ernten musst. Au&szlig;erdem kannst du sehen, wieviele Pl&auml;tze benutzbar sind (kein Unkraut, Stein, ...) und wieviele davon aktuell noch unbenutzt sind.<br>Bewegst du deine Maus &uuml;ber eine dieser Informationen, werden die betreffenden Felder gelb angezeigt, so dass du sie schnell finden kannst. Bei der Anzeige der zu gie&szlig;enden und erntenden Felder wird ein Zeitfenster von 5 Minuten einbezogen.',
+            "helpconfig"                : '<b>Konfiguration</b><br>Du kannst WIMPer einstellen. So kann eingestellt werden, ob Daten an den Infoserver gesendet werden, oder von dort empfangen werden. Zudem kannst du die Einf&auml;rbung der Pflanzen auf dem Marktplatz und in der Produkt&uuml;bersicht an-/abstellen. Zudem kannst du einstellen, ob du bei einem stattfindenden Datentransfer informiert werden m&ouml;chtest, wenn es von WIMPer ein Update gibt. Als weiteres kannst du eine Angebotsschwelle als Prozentsatz festlegen, ab dem das Angebot farblich lila gekenneichnet wird. Die Konfiguration siehst du, wenn du neben dem Logout-Button auf <img id="wimper_button"> klickst.',
+            "helpupdatelink"            : '<b>Updatelink</b><br>Wie oben geschrieben, kannst du in der Konfiguration die Information &uuml;ber existierende Updates an- bzw abstellen. In jedem Falle wird der Downloadlink im Konfigurationsfenster angezeigt.',
+            "configwelcome"             : 'Hier kannst du WIMPer einstellen.',
+            "version"                   : 'Version',
+            "configwarning"             : 'Du benutzt WIMPer damit auf eigene Gefahr.',
+            "configdiscussionlink"      : 'Bitte &auml;u&szlig;ert Verbesserungsideen <a href="http://userscripts.org/scripts/discuss/40956" target="_blank">hier</a>.',
+            "configdownload"            : 'Download',
+            "configdownloadquestion"    : '(Daten herunterladen anbieten?)',
+            "configupload"              : 'Upload',
+            "configuploadquestion"      : '(Preise versenden?)',
+            "configwimpoffer"           : 'Gutes Angebot',
+            "configwimpoffernotice"     : 'Angebot durch Kosten in %',
+            "configwimpoffertitle"      : 'Zeigt das Angebot des Wimps in lila an, wenn dieser Prozentsatz erreicht wird.',
+            "configcolorlinks"          : 'Links einf&auml;rben',
+            "configcolorlinkstitle"     : 'Gilt nur f&uuml;r Pflanzen, die bereits einmal auf dem Marktplatz abgerufen worden sind.',
+            "configcolorlinksnotice"    : '(Marktplatz: Farbe f&uuml;r veraltete Daten in Produkt&uuml;bersicht)',
+            "configmarkoverprice"       : 'Preise markieren',
+            "configmarkoverpricenotice" : '(Marktplatz: Preise gr&ouml;&szlig;er als NPC-Preis markieren)',
+            "configupdateinfo"          : 'Update-Info',
+            "configsubmitbutton"        : '&Auml;nderungen speichern',
+            "infonow"                   : 'jetzt',
+            "infowater"                 : 'w&auml;ssern',
+            "infoharvest"               : 'ernten',
+            "infousable"                : 'nutzbar',
+            "infounused"                : 'unbenutzt',
+            "actualupdatenotice"        : 'WIMPer wurde aktualisiert!\nEs wurden Veränderungen an der Kompatibilität vorgenommen. So sollte das Infofeld des Zwerges im oberen Banner die Anzeigefunktionen des Scriptes nicht mehr behindern. Das Hintergrundbild des Konfigurationsfenster wird auch ohne GFX-Paket wieder angezeigt.\n\nBitte äußere Verbesserungsideen im Diskussionsforum. Den Link findest du im WIMPermenu.'
+        },
+        "pl" : {
+            "updatenotice"              : 'Mozliwa jest aktualizacja!\nPobierz i zainstaluj! Linka znajdziesz w menu WIMPera. ',
+            "updatereloadnotice"        : 'Po aktualizacji odswiez strone.\nDziekuje.',
+            "wimpnotallplantsknown"     : 'Nie sa znane wszystkie dane roslin.\nOdwiedz targ aby pozyskac nazwy.',
+            "wimpnotallcostsknown"      : 'Nie sa znane wszystkie ceny roslin u NPC.\nOdwiedz strone Rosliny\nw menu Pomoc.\nDziekuje.',
+            "market"                    : 'Targ',
+            "questiongetdbupdate"       : 'Pobrac dane z serwera?',
+            "dbupdatemarketrecommend"   : 'Zalecana jest aktualizacja cen!',
+            "comesupto"                 : 'Wartosc oferty to',
+            "ofthecosts"                : 'kosztów.',
+            "costs"                     : 'Suma',
+            "moneyunit"                 : 'kt',
+            "contractcutplants"         : 'Uwaga nazwa rosliny jest niepelna!!',
+            "missing"                   : 'Brakuje',
+            "allonstock"                : 'Wszystko w magazynie',
+            "helpnotallplantsknown"     : 'Nie sa znane wszystkie dane roslin.\nOdwiedz targ aby pozyskac nazwy.\nJesli juz to zrobiles to zignoruj ten komunikat.',
+            "updatelinktitle"           : 'Dostepna jest aktualizacja! Pobierz tutaj!',
+            "questionshowupdatenotice"  : '(Pokazac informacje podczas wysylania/odbierania danych na serwer?)',
+            "costssent"                 : 'WIMPer: Cena wyslana na serwer. Dziekuje!',
+            "sendfailed"                : 'WIMPer: Wysylanie ceny na serwer nie powiodlo sie!',
+            "erroroccured"              : 'Blad!',
+            "helpwelcome"               : 'Witam w pomocy WIMPera. Tutaj znajdziesz wszystkie informacje dotyczace obslugi WIMPera.',
+            "helpbeginning"             : '<b>Pierwsze kroki...</b><br>... sa proste. WIMPer jest tak zaprogramowany, ze dziala z produktami, które nie sa mu jeszcze znane. Dlatego musisz najpierw odwiedzic targ i wybrac kazdy produkt aby WIMPer pozyskal jego nazwe i cene. <br>Nastepnie musisz otworzyc <a href="hilfe.php?item=2">strone dotyczaca Roslin</a> w Pomocy gry aby WIMPer mógl pobrac ceny roslin u NPC.<br>Ten ostatni krok trzeba powtórzyc tylko gdy zostana dodane do gry nowe rosliny.',
+            "helpmarketplaceoverview"   : '<b>Targ - Przeglad produktów</b><br>Wszystkie rosliny, których ceny sa nieaktualne zaznaczone sa na zólto. (Ta opcje mozna wylaczyc w menu WIMPera).',
+            "helpmarketplace"           : '<b>Targ</b><br>Kiedykolwiek odwiedzisz strone jakiejs rosliny na targu, zostanie obliczona srednia z trzech najnizszych cen danej rosliny, a nastepnie zapisana w bazie danych WIMPera. Dodatkowo te dane zostana wyslane do serwera wiec inni uzytkownicy WIMPera beda mogli pozyskac te dane bez odwiedzania targu. Równiez i ty mozesz korzystac z tego, iz inni wysylaja dane na serwer. Dane kazdej roslin moga byc aktualizowane raz na 10 minut zeby zapobiec przeciazeniu serwera. (Ta opcja moze byc wylaczona w menu WIMPera).',
+            "helpwimpinfo"              : '<b>Wimp – okienko informacji</b><br>Gdy najedziesz kursorem na postac Wimpa, wyswietli sie okienko informacji, w którym dowiesz sie czy masz juz wszystkie potrzebne rosliny czy moze jeszcze potrzebujesz niektórych roslin. Jesli nie bedzie w magazynie wszystkich potrzebnych roslin w okienku wyswietla sie nazwy tych roslin, których brakuje. W obliczeniu ilosci posiadanych roslin brane sa pod uwage rosliny w magazynie jak i te, które zostaly przyslane w umowie np. do siebie (oszczednosc miejsca w magazynie). Aby WIMPer wliczyl rosliny z umowy wystarczy wejsc do menu Umowy, a jesli bedziemy chcieli skorzystac z tych zapasów wystarczy anulowac umowe wyslana do siebie. <br><b>-&gt;WAZNE&lt;-</b><br>Umowy zawierajace wiele roslin moga byc zle rozpoznawane przez WIMPera i te rosliny moga nie zostac wliczone w kalkulacje.',
+            "helpwimpsale"              : '<b>Sprzedaz do Wimpa</b><br>Jesli chcesz sprzedac Wimpowi produkty i otworzysz okienko z jego oferta zobaczysz tam informacje jaki bylby koszt sprzedazy tych produktów na targu (kwota nizej) w porównaniu do oferty pienieznej Wimpa (kwota wyzej). Dodatkowo mozesz zobaczyc wartosc kazdej rosliny z osobna najezdzajac kursorem na nia. Przesuwajac kursor na kwote oferty Wimpa pojawi sie procentowa wartosc oferty Wimpa w porównaniu do wartosci roslin na targu. Jesli ta wartosc procentowa jest wyzsza niz ta, która ustawiono w menu bedzie ona wyswietlana fioletowym kolorem. Poza tym jesli ta wartosc bedzie okolo 100% to kolor bedzie zielony, a jesli bedzie ponizej ustawionej wartosci procentowej kolor bedzie czerwony.',
+            "helpupdate"                : '<b>Aktualizacja cen</b><br>Jesli masz otwarta oferte Wimpa i cena rosliny jest nieaktualna mozesz skorzystac z opcji aktualizacji cen.<br>Aktualizacja cen poprzez pobranie danych z serwera jest dostepna pod zielonym przyciskiem obok nazwy rosliny w ofercie Wimpa. Aktualizacja w ten sposób jest mozliwa raz na godzine na kazdy serwer zeby zapobiec przeciazeniu serwera. (Ta opcja moze zostac wylaczona w menu).<br>Czerwony przycisk obok nazwy rosliny oznacza ze cena jest nieaktualna, a aktualizacja poprzez serwer jest niedostepna (jeszcze). To oznacza ze nalezy dokonac aktualizacji cen poprzez wizyte na targu i wyboru odpowiednich roslin.',
+            "helpcostprotection"        : '<b>Ochrona przed wysokimi cenami</b><br>Oferty roslin na targu ktorych ceny sa wyzsze niz ceny u NPC sa zaznaczane na czerwono. (Ta opcje mozna wylaczyc w menu).',
+            "helpconfig"                : '<b>Konfiguracja</b><br>Mozesz konfigurowac WIMPera. Mozesz decydowac czy dane maja byc wysylane na serwer. Równiez jest mozliwosc wlaczenia/wylaczenia opcji wyswietlania na targu zóltym kolorem roslin których ceny sa nieaktualne. Mozesz ustawic czy chcesz byc informowany o dostepnosci aktualizacji WIMPera jak równiez informacje dotyczace trasnferu danych na serwer. Menu konfiguracji mozesz otworzyc klikajac przycisk <img id="wimper_button"> który jest obok przycisku Wylogowania.',
+            "helpupdatelink"            : '<b>Aktualizacje</b><br>Jak bylo wspomniane powyzej - mozesz zdecydowac czy informacje o aktualizacji maja byc wyswietlane. Niezaleznie od ustawien link do aktualizacji zawsze bedzie dostepny w menu.',
+            "configwelcome"             : 'Tutaj mozesz ustawic WIMPera.',
+            "version"                   : 'Wersja',
+            "configwarning"             : 'Uzywasz WIMPera na wlasna odpowiedzialnosc.',
+            "configdiscussionlink"      : 'Jesli masz pomysly jak ulepszyc WIMPera kliknij <a href="http://userscripts.org/scripts/discuss/40956" target="_blank">tutaj</a>.',
+            "configdownload"            : 'Pobieranie',
+            "configdownloadquestion"    : '(Pobierac dane z serwera?)',
+            "configupload"              : 'Wysylanie',
+            "configuploadquestion"      : '(Wysylac dane na serwer?)',
+            "configwimpoffer"           : 'Korzystne oferty',
+            "configwimpoffernotice"     : 'relacja: oferta do kosztów w %',
+            "configwimpoffertitle"      : 'Oferta zostanie wyswietlona fioletowym kolorem jesli zajdzie ta relacja.',
+            "configcolorlinks"          : 'Nieaktualne ceny',
+            "configcolorlinkstitle"     : 'Dziala tylko dla tych produktów których cena byla chociaz jeden raz pobrana!',
+            "configcolorlinksnotice"    : '(Targ: zaznaczanie na zólto roslin z nieaktualnymi cenami)',
+            "configmarkoverprice"       : 'Wysokie ceny',
+            "configmarkoverpricenotice" : '(Targ: zaznaczanie cen roslin wyzszych niz u NPC)',
+            "configupdateinfo"          : 'Informacje',
+            "configsubmitbutton"        : 'Zapisz zmiany',
+            "infowater"                 : 'podley',
+            "infoharvest"               : 'zbierz plony'
+        },
+        "hu" : {
+            "updatenotice"              : 'Letöltheto frissítés!\nTöltsd le, és telepítsd! A letöltési link a WIMPer\' menüjében van.',
+            "updatereloadnotice"        : 'Miután a frissítés végzett tölsd be újra az oldalt.\nKöszönöm.',
+            "wimpnotallplantsknown"     : 'Bizonyos növények ismeretlenek.\nLátogasd meg a piacot, és nyisd meg a növényenként az ajánlatokat.',
+            "wimpnotallcostsknown"      : 'Bizonyos növények bolti ára ismeretlen.\nKérlek nyisd meg a Súgó-ban a növények lapját.\nKöszönöm.',
+            "market"                    : 'piac',
+            "questiongetdbupdate"       : 'Adatletöltés a szerverrol?',
+            "dbupdatemarketrecommend"   : 'Ajánlatos a piaci árak frissítése.',
+            "comesupto"                 : 'A felkínált ár',
+            "ofthecosts"                : '-a a piaci értéknek.',
+            "costs"                     : 'Piaci érték',
+            "moneyunit"                 : 'gyT',
+            "contractcutplants"         : 'Figyelem: az objektum nevek csonkolva!!',
+            "missing"                   : 'hiányzik',
+            "allonstock"                : 'Minden növény rendelkezésre áll',
+            "helpnotallplantsknown"     : 'Bizonyos növények ismeretlenek.\nLátogasd meg a piacot, és nyisd meg a növényenként az ajánlatokat.\nHa ezt már megtetted,\nhagyd figyelmen kívül ezt az üzenetet.',
+            "updatelinktitle"           : 'WIMPer frissítés elérheto! Töltsd le itt!',
+            "questionshowupdatenotice"  : '(Megjelenjen a frissítési információ az árak feltöltésekor?)',
+            "costssent"                 : 'WIMPer: Az ár frissítve. Köszönjük!',
+            "sendfailed"                : 'WIMPer: Ár küldése sikertelen!',
+            "erroroccured"              : 'Hiba történt!',
+            "helpwelcome"               : 'Üdvözöl a WIMPer\' súgó. Itt mindent megtalálsz ami szükséges, hogy használhasd a WIMPer-t.',
+            "helpbeginning"             : '<b>Az elso lépések...</b><br>... a legkönnyebbek. WIMPer úgy lett programozva, hogy azokat a növényeket is kezeli, melyeket korábban nem ismert. Indulásként el kell látogatnod a piacra a termék listára, hogy a WIMPer megismerhesse a terményeket. Azután meg kell nyitnod a <a href="hilfe.php?item=2">növények súgó oldalt</a> hogy a WIMPer betöltse a növények bolti árát. Ezt csak akkor kell újra végrehajtani ha új növény kerül bevezetésre.',
+            "helpmarketplaceoverview"   : '<b>Piac – termék lista</b><br>Ezen az oldalon azon növények neve melyek ára nincs frissítve sárgával jelenik meg. (Ez az opció letiltható a beállító menüben.)',
+            "helpmarketplace"           : '<b>Piac - árak</b><br>Valahányszor a piacon megnyitod egy növény oldalát a WIMPer kiszámítja a legolcsóbb három ajánlat átlagos árát, és elmenti a Te helyi adatbázisodba. Ez az adatot a WIMPer elküldi egy szervernek, mely gyujti az adatokat, így nem kell mindenkinek meglátogatnia a piacot, hogy a legfrissebb árakat megkaphassák. Cserébe Te is megkapod az árakat, amit mások töltöttek fel. Minden növény adatai 10 percenként csak egyszer tölthetok fel, hogy elkerülheto legyen a szerver túlterhelése. (Ez az opció letiltható a beállító menüben.)',
+            "helpwimpinfo"              : '<b>Vásárló-infó</b><br>Valahányszor az egeret egy vásárló felett húzod át a WIMPer kiírja, hogy készelet van-e minden kívánt növény, vagy nem. Új képesség, hogy információt ad azokról a növényekrol, melyeket szerzodésben küldted el magadnak. <br>Ez a szimbólum: <img id="wimper_info_contract"> jelzi, hogy egy szerzodésed van, melyet vissza kell vonnod. Egy másik szimbólum: <img id="wimper_info_market"> azt jelzi, hogy nincs elegendo készleted a növénybol.<br><b>-&gt;FONTOS&lt;-</b><br>A szerzodésekben nem lehet túl sok fajta növény. Ha túl sokféle növény szerepel egy szerzodésben akkor a címében csak ennyi szerepel "...", és az itt fel nem sorolt termékeket nem veszi figyelembe a kalkuláció. Egy figyelmeztetés jelenik meg, ha ilyen szerzodés található.',
+            "helpwimpsale"              : '<b>Vásárlónak történo eladás</b><br>Ha üzletelni akarsz a vásárlóval, és rákattintasz, a vásárló ajánlata alatt megkapod azt a kiegészíto információt mennyit keresnél a termékekkel, ha a piacon adnád el. Ezt „költség”-ként írja ki. Ezen kívül láthatod minden termék piaci értékét ha az egeret a listában fölé húzod. Ha az egeret a vevo ajánlata fölé húzod megkapod az ajánlat százalékos viszonyítását a piaci értékhez. Ha ez a százalékos érték magasabb mint amit a beállító menüben megadtál, az ajánlat színe lila lesz. Ha ez az érték magasabb 100%-nál, a szin zöld lesz, ha egyiket sem éri el akkor vörös.',
+            "helpupdate"                : '<b>Árak frissítése</b><br>H megnyitottad a vásárló ajánlatát, és a növény adatai nem frissek, két módon lehet frissíteni.<br>Az adatok frissíthetoek a szerverrol való letöltéssel. Csak rá kell kattintani a növény neve melletti zöld szimbólumra. Ezen a módon való frissítés csak egyszer hajtható végre óránként, hogy az adatgyujto szerver ne legyen túlterhelt. (Ez az opció letiltható a beállító menüben.)<br> A növények neve mellett vörös szimbólum látható, ha az adata már nem friss, és az adatgyujto szerverrol történo frissítés nem lehetséges. Ekkor meg kell látogatnod a piacot, hogy a fentebb leírt módon kaphasd meg a legfrissebb árakat.',
+            "helpcostprotection"        : '<b>Túlfizetés védelem</b><br>Olykor a piaci ajánlatok drágábbak a bolti áraknál. Ezek az ajánlatok piros színnel jelennek meg. (Ez az opció letiltható a beállító menüben.)',
+            "helpgardeninfo"            : '<b>Kert-infó</b><br>Az aktuális kert összesíto információja a polc felett a bal szélen jelenik meg. Itt láthatod, mikor kell öntözni, és betakarítani a növényeket. Ettol jobbra találod hány mezonyi hely használható, és pillanatnyilag mennyi kihasználatlan.',
+            "helpconfig"                : '<b>Beállító menü</b><br>A WIMPer beállító menüjében szabályozható, küldjél illetve fogadjál-e adatokat a szerver irányában. Továbbá engedélyezheted, vagy tilthatod a növények színezését a piaci áttekinto listán. Eldöntheted, akarsz-e információt kapni a WIMPer frissítéseirol mikor adatot küldesz a szervernek. Kattints a jelre: <img id="wimper_button"> a kijelentkezo gomb mellett a beállító menü megnyitásához.',
+            "helpupdatelink"            : '<b>Frissítés link</b><br>Mint fentebb említettük, eldöntheted, hogy a WIMPer frissítési információk megjelenjenek-e, ettol függetlenul a Beállítási képernyon a link megjelenik.',
+            "configwelcome"             : 'A WIMPer beállító oldala.',
+            "version"                   : 'verzió',
+            "configwarning"             : 'A WIMPer-t csak saját feleloségedre használhatod!!',
+            "configdiscussionlink"      : 'Kérlek, a fejlesztési ötleteidet ide küldjed <a href="http://userscripts.org/scripts/discuss/40956" target="_blank">IDE</a>.',
+            "configdownload"            : 'letöltés',
+            "configdownloadquestion"    : '(ajánlat adatok letöltése?)',
+            "configupload"              : 'feltöltés',
+            "configuploadquestion"      : '(ár adatok feltöltése?)',
+            "configwimpoffer"           : 'jó ajánlat',
+            "configwimpoffernotice"     : 'viszonyítás: ajánlat a piaci érték %-ában',
+            "configwimpoffertitle"      : 'Az ajánlat lilára színezodik, ha az arány eléri a megadott szintet',
+            "configcolorlinks"          : 'linkek átszinezése',
+            "configcolorlinkstitle"     : 'Csak a már legalább egyszer megtekintett növényekre vonatkozik.',
+            "configcolorlinksnotice"    : '(Piac: a frissítést igénylo növények nevének színezése az áttekinto listán)',
+            "configmarkoverprice"       : 'túlfizetés jelzés',
+            "configmarkoverpricenotice" : '(Piac: a boltinál magasabb árak színezése)',
+            "configupdateinfo"          : 'WIMPer frissítés',
+            "configsubmitbutton"        : 'változások mentése',
+            "infonow"                   : 'most',
+            "infowater"                 : 'öntözés',
+            "infoharvest"               : 'aratás',
+            "infousable"                : 'muvelheto',
+            "infounused"                : 'üres'
+        },
+        "com" : {
+            "updatenotice"              : 'Update available!\nPlease download and install! A link to the download can be found at WIMPer\'s menu.',
+            "updatereloadnotice"        : 'After update finishes please reload site.\nThank you.',
+            "wimpnotallplantsknown"     : 'Some plant IDs are unknown.\nPlease visit the marketplace and click on the product overview.',
+            "wimpnotallcostsknown"      : 'The NPC\'s costs of some plants are unknown.\nPlease visit the plant\'s page ofthe game\'s help.\nThank you.',
+            "market"                    : 'market',
+            "questiongetdbupdate"       : 'Download data from server?',
+            "dbupdatemarketrecommend"   : 'It is recommended to get more recent prices from the marketplace.',
+            "comesupto"                 : 'Comes up to',
+            "ofthecosts"                : 'of the costs.',
+            "costs"                     : 'costs',
+            "moneyunit"                 : 'gB',
+            "contractcutplants"         : 'Warning: the names of the objects are cut!!',
+            "missing"                   : 'missing',
+            "allonstock"                : 'everything on stock',
+            "helpnotallplantsknown"     : 'Some plant IDs are unknown.\nPlease visit the marketplace and click on the product overview.\nIf you have done so already,\nplease ignore this message.',
+            "updatelinktitle"           : 'WIMPer update available! Download here!',
+            "questionshowupdatenotice"  : '(Show update info while sending/retrieving price data?)',
+            "costssent"                 : 'WIMPer: Price sent. Thank you!',
+            "sendfailed"                : 'WIMPer: Sending price failed!',
+            "erroroccured"              : 'An error occured!',
+            "helpwelcome"               : 'Welcome to WIMPer\'s help. Here you can find information on everything you need to know in order to use WIMPer.',
+            "helpbeginning"             : '<b>The first steps...</b><br>... are the easiest. WIMPer is programmed to be compatible even with plants that have not been designed, yet. For a starter it is required that you visit the product overview in the marketplace so that WIMPer can retrieve the IDs of the plants. After this you need to open <a href="hilfe.php?item=2">the plant\'s help page</a> to retrieve the NPC prices of the plants. You only need to repeat these steps if new plants are introduced.',
+            "helpmarketplaceoverview"   : '<b>marketplace - product overview</b><br>On this page the names of the plants whose data is outdated is shown in yellow. (This option can be disabled in the configuration menu.)',
+            "helpmarketplace"           : '<b>marketplace</b><br>Whenever you visit the page of a plant at the marketplace WIMPer calculates the average price of the three cheapest offers and saves it to your local database. This data is then sent to a server that collects data so others do not need to visit the marketplace to get the most up-to-date prices. In return you can profit of prices that have been uploaded by other users. The data of each plant can only be uploaded once every 10 minutes to avoid an overload of the server. (This option can be disabled in the configuration menu.)',
+            "helpwimpinfo"              : '<b>wimp-info</b><br>Whenever you mouse moves over a wimp, WIMPer will tell you whether you have every plant in stock or not. A new feature includes information on plants that you might have sent to yourself with a contract to calculate whether there are enough plants in your stock.<br>The symbol <img id="wimper_info_contract"> indicates there is a contract you need to cancel. Another symbol <img id="wimper_info_market"> tells you to either plant or grow additional plants.<br><b>-&gt;IMPORTANT&lt;-</b><br>Contracts must not contain too many different plants. If there are to many plants in a contract, so that the subject uses a "...", the plants not mentioned will not be considered in the calculation. A warning will be shown in case such a contract is found.',
+            "helpwimpsale"              : '<b>sale to a wimp</b><br>If you want to make a deal with a wimp and click on him/her, you get information on how much money you would earn if you sold these plants at the marketplace in addion to the wimp\'s offer. These are marked as costs. Additionally you can see each the costs of the products if you move your mouse over them. By moving your mouse over the wimp\'s offer you will get percental value of the offer in relation to the costs. If that percentual value is higher than the value you have set in the configuration its color will be purple. If that value is higher than 100% the color will be green and if neither is reached the color will be red.',
+            "helpupdate"                : '<b>Updating Prices</b><br>If you have opened a wimp\'s offer and the data of your plants is outdated, there are two options for an update.<br>You can get an update by downloading data from the server. Just click the green symbol behind the products. An update by using this method is available only once an hour so that the server server collecting the data is not overloaded. (This option can be disabled at the configuration menu.)<br>There is a red symbol behind the products whose data is outdated and if an update using the collecting server is not available (yet). This means you have visit the marketplace to get the most up-to-date prices by yourself like mentioned above.',
+            "helpcostprotection"        : '<b>Overprice protection</b><br>Sometimes offers at the marketplace are more expensive than at the NPC stores. Those offers are marked red. (This option can be disabled at the configuration menu.)',
+            "helpgardeninfo"            : '<b>garden-info</b><br>A summary about the actual garden is displayed above the rack to the left. Here you can find information on when to water and to harvest your plants. Right next to this you can see how many fields are available for use and how many are actually unused.<br>Moving your cursor over one of these information will highlight the specific fields. This way you can easily find the fields you need to work on. The highlighting of plants to water or to harvest there is a time range of 5 minutes including all fields within that range.',
+            "helpconfig"                : '<b>configuration</b><br>You can choose WIMPer\'s setup. It is you who decides whether to send or retrieve the server or not. You can also enable or disable the coloration of the plants at the product overview of the marketplace. You can decide whether you want to be informed about updates of WIMPer while transfering data to the server. Click on the <img id="wimper_button"> next to the logout-button to open the configuration menu.',
+            "helpupdatelink"            : '<b>update link</b><br>As mentioned above you can decide whether update information should be displayed. Indepentendly a link to the update will be shown in the configuration menu.',
+            "configwelcome"             : 'You can setup WIMPer here.',
+            "version"                   : 'version',
+            "configwarning"             : 'You are using WIMPer at your own risk.',
+            "configdiscussionlink"      : 'Please post ideas of possible improvement <a href="http://userscripts.org/scripts/discuss/40956" target="_blank">here</a>.',
+            "configdownload"            : 'download',
+            "configdownloadquestion"    : '(offer data download?)',
+            "configupload"              : 'upload',
+            "configuploadquestion"      : '(upload price data?)',
+            "configwimpoffer"           : 'good offer',
+            "configwimpoffernotice"     : 'relation: offer to costs in %',
+            "configwimpoffertitle"      : 'the offer will be colored purple if this relation reached or surpassed',
+            "configcolorlinks"          : 'color links',
+            "configcolorlinkstitle"     : 'Only counts for plants visited at the marketplace at least once.',
+            "configcolorlinksnotice"    : '(marketplace: colors outdated plants at the product overview)',
+            "configmarkoverprice"       : 'mark overprice',
+            "configmarkoverpricenotice" : '(marketplace: colors prices higher than the NPC\'s price)',
+            "configupdateinfo"          : 'update info',
+            "configsubmitbutton"        : 'save changes',
+            "infonow"                   : 'now',
+            "infowater"                 : 'water',
+            "infoharvest"               : 'harvest',
+            "infousable"                : 'usable',
+            "infounused"                : 'unused',
+            "actualupdatenotice"        : 'WIMPer has been updated!\nRecent changes have been made to provide compatibility with actual versions of molehillempire. The information field on top should no longer overlay the script\'s highlight functions. The routine for finding the GFX-link was updated so the background image of WIMPer\'s configuration window should be back.\n\nIf you are interested in supplying a translation for your language, use the script\'s forum. The link can be found at WIMPer\'s config menu. Please join in there for any suggestions, too.'
+        }
+    }
+
+    locale = (locales[country] != null) ? locales[country] : locales["com"];
+    for(actLocData in locales["com"]) {
+        if(locale[actLocData] == null) locale[actLocData] = locales["com"][actLocData];
+    }
+    delete locales;
 
     /************************************************************
      ***                                                       ***
@@ -1952,306 +2301,6 @@
      ***                        Anfang                         ***
      ***                                                       ***
      ************************************************************/
-
-/************************************************************
- ***                                                       ***
- ***                       Ladeschutz                      ***
- ***                                                       ***
- *** Von nun an wird das Script auf jeder Seite geladen,   ***
- *** doch zuvor wird geschaut, ob das Script auf dieser    ***
- *** benötigt wird. Dies wird getan, damit die schnelle    ***
- *** Implementierung auch auf nicht-deutschen Seiten       ***
- *** gewährleistet wird.                                   ***
- ***                                                       ***
- ************************************************************/
-
-var country, server, page, subpage;
-//searchSpec = /^http:\/\/[a-zA-Z]*(\d+)\.([-a-zA-Z0-9_]{1,3}\.)?([-a-zA-Z0-9_]+)\.([a-zA-Z\.]{2,5})\/(.*?)(markt|verkauf|hilfe|main|overview|garten_map)\.php/;
-searchSpec = /^http:\/\/[a-zA-Z]*(\d+)\.([-a-zA-Z0-9_]{1,3}\.)?([-a-zA-Z0-9_]+)\.([a-zA-Z\.]{2,5})\/(.*?)(markt|verkauf|verkauf_map|hilfe|main|overview|garten_map)\.php/;
-//alert("oli: href="+window.location.href);
-//alert("oli: referer="+document.referrer);
-//alert("oli: referer="+document.referrer+" loc="+window.location.href);
-sitedata = searchSpec.exec(window.location.href);
-if(sitedata != null) {
-    if(sitedata[3] == "bahcivanlardiyari") {
-        // Gibts keine t?rkische Domain?
-        country = "tr";
-    }
-    else if(sitedata[2] != undefined) {
-        country = sitedata[2].substr(0, sitedata[2].length-1).replace(".","_");
-    }
-    else {
-        country = sitedata[4];
-    }
-    server  = parseInt(sitedata[1], 10);
-    page    = sitedata[5];
-    subpage = sitedata[6];
-//  alert("oli: subpage="+subpage);
-
-// Notiz: Die Einrückung erfolgt hier nicht
-
-    /************************************************************
-     ***                                                       ***
-     ***                  Typen-Definitionen                   ***
-     ***                                                       ***
-     *** JSON: Benötigt für Datentransfer und Speicherung      ***
-     *** Number: Einheitliche Geld-Formatierung                ***
-     ***                                                       ***
-     ************************************************************/
-
-    Array.prototype.______array='______array';var JSON={org:'http://www.JSON.org',copyright:'(c)2005 JSON.org',license:'http://www.crockford.com/JSON/license.html',stringify:function(arg){var c,i,l,s='',v;switch(typeof arg){case'object':if(arg){if(arg.______array=='______array'){for(i=0;i<arg.length;++i){v=this.stringify(arg[i]);if(s){s+=','}s+=v}return'['+s+']'}else if(typeof arg.toString!='undefined'){for(i in arg){v=arg[i];if(typeof v!='undefined'&&typeof v!='function'){v=this.stringify(v);if(s){s+=','}s+=this.stringify(i)+':'+v}}return'{'+s+'}'}}return'null';case'number':return isFinite(arg)?String(arg):'null';case'string':l=arg.length;s='"';for(i=0;i<l;i+=1){c=arg.charAt(i);if(c>=' '){if(c=='\\'||c=='"'){s+='\\'}s+=c}else{switch(c){case'\b':s+='\\b';break;case'\f':s+='\\f';break;case'\n':s+='\\n';break;case'\r':s+='\\r';break;case'\t':s+='\\t';break;default:c=c.charCodeAt();s+='\\u00'+Math.floor(c/16).toString(16)+(c%16).toString(16)}}}return s+'"';case'boolean':return String(arg);default:return'null'}},parse:function(text){var at=0;var ch=' ';function error(m){throw{name:'JSONError',message:m,at:at-1,text:text}}function next(){ch=text.charAt(at);at+=1;return ch}function white(){while(ch!==''&&ch<=' '){next()}}function str(){var i,s='',t,u;if(ch=='"'){outer:while(next()){if(ch=='"'){next();return s}else if(ch=='\\'){switch(next()){case'b':s+='\b';break;case'f':s+='\f';break;case'n':s+='\n';break;case'r':s+='\r';break;case't':s+='\t';break;case'u':u=0;for(i=0;i<4;i+=1){t=parseInt(next(),16);if(!isFinite(t)){break outer}u=u*16+t}s+=String.fromCharCode(u);break;default:s+=ch}}else{s+=ch}}}error("Bad string")}function arr(){var a=[];if(ch=='['){next();white();if(ch==']'){next();return a}while(ch){a.push(val());white();if(ch==']'){next();return a}else if(ch!=','){break}next();white()}}error("Bad array")}function obj(){var k,o={};if(ch=='{'){next();white();if(ch=='}'){next();return o}while(ch){k=str();white();if(ch!=':'){break}next();o[k]=val();white();if(ch=='}'){next();return o}else if(ch!=','){break}next();white()}}error("Bad object")}function num(){var n='',v;if(ch=='-'){n='-';next()}while(ch>='0'&&ch<='9'){n+=ch;next()}if(ch=='.'){n+='.';while(next()&&ch>='0'&&ch<='9'){n+=ch}}if(ch=='e'||ch=='E'){n+='e';next();if(ch=='-'||ch=='+'){n+=ch;next()}while(ch>='0'&&ch<='9'){n+=ch;next()}}v=+n;if(!isFinite(v)){error("Bad number")}else{return v}}function word(){switch(ch){case't':if(next()=='r'&&next()=='u'&&next()=='e'){next();return true}break;case'f':if(next()=='a'&&next()=='l'&&next()=='s'&&next()=='e'){next();return false}break;case'n':if(next()=='u'&&next()=='l'&&next()=='l'){next();return null}break}error("Syntax error")}function val(){white();switch(ch){case'{':return obj();case'[':return arr();case'"':return str();case'-':return num();default:return ch>='0'&&ch<='9'?num():word()}}return val()}};Number.prototype.toMoney=function(){if(arguments.length==2){var thD=arguments[0],flD=arguments[1]}else{var thD='.',flD=','}var reply='',tmpNum;tmpNum=Math.round(this*100)/100;reply=tmpNum.toFixed(2).toString();fullNum=reply.substring(0,reply.indexOf('.'));flNum=reply.substring(reply.indexOf('.')+1,reply.length);reply='';while(fullNum.length>3){reply=thD+fullNum.substring(fullNum.length-3,fullNum.length)+reply;fullNum=fullNum.substring(0,fullNum.length-3)}reply=fullNum+reply+flD+flNum;return reply};
-
-    /************************************************************
-     ***                                                       ***
-     ***                         Bilder                        ***
-     ***                                                       ***
-     *** Bilder benötigt für Updateanzeige und evtl. Menü      ***
-     *** später                                                ***
-     ***                                                       ***
-     ************************************************************/
-
-    updateS       = 'data:image/jpeg;base64,%2F9j%2F4AAQSkZJRgABAQIAIQAgAAD%2F2wBDAAEBAQEBAQEBAQEBAQECAgMCAgICAgQDAwIDBQQFBQUEBAQFBgcGBQUHBgQEBgkGBwgICAgIBQYJCgkICgcICAj%2F2wBDAQEBAQICAgQCAgQIBQQFCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAj%2FwAARCAAOAA4DAREAAhEBAxEB%2F8QAFwAAAwEAAAAAAAAAAAAAAAAAAAQGCf%2FEACMQAAEDBAICAwEAAAAAAAAAAAECAwQFBgcREiEACBMUMTL%2FxAAZAQACAwEAAAAAAAAAAAAAAAADCQIEBQb%2FxAAmEQACAQMEAQUAAwAAAAAAAAABAhEDBAUABhIhMQcTFCJBUWFx%2F9oADAMBAAIRAxEAPwDcOzMd4qgY7xhlbN0mtV2r3tdrMZhz7KmYlOpkaeyie%2FJUkhalLb%2BVsaI4hYKdEcglDbey9vUMNj8%2FuhmqVMjchQeRCpRp1lFw7kHkSy8lEEEKQQOtLFwO2MPSxlplM8S7XdYAdkKtNKiiqWI%2BxLKSOiIEEeNHsrS7Jx2jFuSPXJp%2BzseXTTZf1kpdlGQ4uM%2BG3PmL7zuxspKeIQACQQo9%2BT9bMficR8DO7LBoWV7TfiJqcyab8W5%2B5Uf9iI4%2F3J70T1Ox2PsPiZPbQ9q2uVaB9%2BUo0GeTt14iI%2FZk96lrbzPDxfQ6lhHK%2BMrYzTZNPqK5UBh6W7Bdpz5%2FssPtp5JQrolGv3feiR5zu3%2FU6jhLOptbcFil%2Fa0qhZAXZGRj5KVF%2BwDGCRHnWRht7JjrZ8DmLRLu3RuSgsyFSfPFl7gwJEaUuK47h9qLjgwokK3ceWlbtNTEo9IiIWpiAwVDaQeipSiNqWdb0ka68r5%2FO3u%2B7xadFEtra2QLSpLPFFJ8D9JJ7LGCetBzOZudy3CqqrRo0FCoizCie%2F8AST2T1P8AGv%2FZ';
-    updateM       = 'data:image/jpeg;base64,%2F9j%2F4AAQSkZJRgABAQIAIQAgAAD%2F2wBDAAEBAQEBAQEBAQEBAQECAgMCAgICAgQDAwIDBQQFBQUEBAQFBgcGBQUHBgQEBgkGBwgICAgIBQYJCgkICgcICAj%2F2wBDAQEBAQICAgQCAgQIBQQFCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAj%2FwAARCAAOAA4DAREAAhEBAxEB%2F8QAFwAAAwEAAAAAAAAAAAAAAAAAAwUGB%2F%2FEACIQAAEEAgICAwEAAAAAAAAAAAECAwQFBgcIEQASCSEiFP%2FEABoBAAEFAQAAAAAAAAAAAAAAAAQBAgMGCAn%2FxAAnEQABAwMEAAYDAAAAAAAAAAABAgMRBAUGABIhMQcyQVFhgRMiof%2FaAAwDAQACEQMRAD8AutV6N43UmjePXIzlzOyjLck23suPXxHVWDkWvosfgXMZq5lz3GiHVqdYMlkepSUBwKT%2BgFDLNutVEimYrK4FRfWAPYJCgFk8z1I%2BO9d4srznJX77csdxEIabtlMpSv1BU486ws06EBQ2gJVtUZBCiIJgwS8%2Bca1BpNvjvvzgtCl6v0dsaitP4WRIsjOeegzUsvmUZkuQSPZSC36BsAKUCFH9eJldLTsJZqrXKGXQY80kpMGZJ%2Bojv10zwBvF4vBuNgzsiprqFbe6Q3sAdRvRs%2FG2iOJB3FXoRA41nOv%2BV1ToDDr%2FAIkckeP%2BB8sdQ0t69ZU8OXayaiTSTFjp1USawkrS050lSmyk%2Fff3%2Bj4FQ39unaNBVNB5tJkSSkgnuCJ79tWXJ%2FCd%2B%2BVreXY1cHLdWPNhKyEIcS4keULbVCSU8gGevkaV55nmc%2FIpnVPVVVPgekNa4RQorcXxatacVDpYanAVJQevZx1au1LdV0T0kdfXkr7zt4eASA2htMJSOgJ%2FvydE45jlD4f0K3XVuVVTVObnXVRuWqOz6AAcJSJA5%2B%2F%2F2Q%3D%3D';
-    menuB         = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8%2F9hAAAAAXNSR0IArs4c6QAAAAZiS0dEAMIAYwAgG2lVdQAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB9kBGAMDA%2BFKDacAAAAIdEVYdENvbW1lbnQA9syWvwAAAuNJREFUOMtlk09oXHUQxz%2Fz%2B70%2FZnfdJjU9CSGo0KIEkhJIqtYWWk0VlIDiIYtFKZVaevAgNSgeVATxJBYPhWJA2XoxkECVrbaH9CCKui0UMaUsXUvTWpOySbrpvvf2vd94aBJSO7cZ5g%2FznfkI%2F7PTY%2BGQwjgiowKAoDiAKUE%2BHSlHv27Ml41OZSysGvEGrNeh1oQiWFQUdSmZizTLIlHc%2BX3lePtajVmfXArrns31h%2BFmzl0ViTPL8T8WWY6Uj2eWCLxNUlssYMTvr5TC%2Bj0NKqWw6pmOnlOXRaZnV9iSs%2FxwuUmcKsUHLFu7Q6432xz%2Bfp7Q7xIjXk%2BlFFYBpDIWDhnj%2FRIGDwHCqUtNXtz2IBdutJipr9Cd93lpa55CYBG5u3GWxcRJAxGGPWDc2g4VMZI65cpiwu6v%2Fsaprmtz%2FLcGnoFXnijy5mAXngkw1lfnknGDyKg1gczOx%2ByfnKPWyvP7zzOoKs450jRFVfnsow9wquyfnGN2IcFKIMCoJ0Crbbi2HPH%2Brm563%2FicgeGdfHNyksPHlrBGOHakk7ff%2B5Cj1bMcGbrO2VqThwsGK6siBhb2PpLn4s2EwZ17AJj4KcW5jLazTPwYIyIUtj0NwJ5HCwR29QqqoJqCCFtyhqX5GwBssnPYzYPYzj6Kcjdmbt9c18VpunZGnWolkZ6pNdnRk%2BPriROoKuUvDvHuc5c4%2BuxffPvlIW79M8ed2XOoKmdqTaJ2rAJT9rU%2Bv25NdjAj5J3T86TXLnKrGfPU7r3serKPZ3b00Wws8NarzxO2%2FuWTmQVeeMynO5eIIK%2FL2iMZ4%2Fcb0yknqst89%2BcyqbuXEd%2FCy48XOTCQx2UNRbkwcjLavs5CpRTWjXg9vlcUawNSB1caCYLQ2%2BVjBbLsDu30tip6dV857r0fplJYFWTAGF%2BNBCLGA1WcpjgXq9NUBDk%2FUo7uhwlglbLhzCXT7bRJkiySpEuk2Qqq6bSIDG8sBvgPA2JAyp93NCUAAAAASUVORK5CYII%3D';
-    symb_contract = 'data:image/gif;base64,R0lGODlhBwAHAPcAAAAAAIAAAACAAICAAAAAgIAAgACAgICAgMDAwP8AAAD%2FAP%2F%2FAAAA%2F%2F8A%2FwD%2F%2F%2F%2F%2F%2FwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMwAAZgAAmQAAzAAA%2FwAzAAAzMwAzZgAzmQAzzAAz%2FwBmAABmMwBmZgBmmQBmzABm%2FwCZAACZMwCZZgCZmQCZzACZ%2FwDMAADMMwDMZgDMmQDMzADM%2FwD%2FAAD%2FMwD%2FZgD%2FmQD%2FzAD%2F%2FzMAADMAMzMAZjMAmTMAzDMA%2FzMzADMzMzMzZjMzmTMzzDMz%2FzNmADNmMzNmZjNmmTNmzDNm%2FzOZADOZMzOZZjOZmTOZzDOZ%2FzPMADPMMzPMZjPMmTPMzDPM%2FzP%2FADP%2FMzP%2FZjP%2FmTP%2FzDP%2F%2F2YAAGYAM2YAZmYAmWYAzGYA%2F2YzAGYzM2YzZmYzmWYzzGYz%2F2ZmAGZmM2ZmZmZmmWZmzGZm%2F2aZAGaZM2aZZmaZmWaZzGaZ%2F2bMAGbMM2bMZmbMmWbMzGbM%2F2b%2FAGb%2FM2b%2FZmb%2FmWb%2FzGb%2F%2F5kAAJkAM5kAZpkAmZkAzJkA%2F5kzAJkzM5kzZpkzmZkzzJkz%2F5lmAJlmM5lmZplmmZlmzJlm%2F5mZAJmZM5mZZpmZmZmZzJmZ%2F5nMAJnMM5nMZpnMmZnMzJnM%2F5n%2FAJn%2FM5n%2FZpn%2FmZn%2FzJn%2F%2F8wAAMwAM8wAZswAmcwAzMwA%2F8wzAMwzM8wzZswzmcwzzMwz%2F8xmAMxmM8xmZsxmmcxmzMxm%2F8yZAMyZM8yZZsyZmcyZzMyZ%2F8zMAMzMM8zMZszMmczMzMzM%2F8z%2FAMz%2FM8z%2FZsz%2Fmcz%2FzMz%2F%2F%2F8AAP8AM%2F8AZv8Amf8AzP8A%2F%2F8zAP8zM%2F8zZv8zmf8zzP8z%2F%2F9mAP9mM%2F9mZv9mmf9mzP9m%2F%2F%2BZAP%2BZM%2F%2BZZv%2BZmf%2BZzP%2BZ%2F%2F%2FMAP%2FMM%2F%2FMZv%2FMmf%2FMzP%2FM%2F%2F%2F%2FAP%2F%2FM%2F%2F%2FZv%2F%2Fmf%2F%2FzP%2F%2F%2FyH5BAEAABAALAAAAAAHAAcAAAgeAP9x4%2Fav4D8%2BphAqNKWvYcOEDhsijKgPYsSFCwMCADs%3D';
-    symb_market   = 'data:image/gif;base64,R0lGODlhBwAHAPcAAAAAAIAAAACAAICAAAAAgIAAgACAgICAgMDAwP8AAAD%2FAP%2F%2FAAAA%2F%2F8A%2FwD%2F%2F%2F%2F%2F%2FwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMwAAZgAAmQAAzAAA%2FwAzAAAzMwAzZgAzmQAzzAAz%2FwBmAABmMwBmZgBmmQBmzABm%2FwCZAACZMwCZZgCZmQCZzACZ%2FwDMAADMMwDMZgDMmQDMzADM%2FwD%2FAAD%2FMwD%2FZgD%2FmQD%2FzAD%2F%2FzMAADMAMzMAZjMAmTMAzDMA%2FzMzADMzMzMzZjMzmTMzzDMz%2FzNmADNmMzNmZjNmmTNmzDNm%2FzOZADOZMzOZZjOZmTOZzDOZ%2FzPMADPMMzPMZjPMmTPMzDPM%2FzP%2FADP%2FMzP%2FZjP%2FmTP%2FzDP%2F%2F2YAAGYAM2YAZmYAmWYAzGYA%2F2YzAGYzM2YzZmYzmWYzzGYz%2F2ZmAGZmM2ZmZmZmmWZmzGZm%2F2aZAGaZM2aZZmaZmWaZzGaZ%2F2bMAGbMM2bMZmbMmWbMzGbM%2F2b%2FAGb%2FM2b%2FZmb%2FmWb%2FzGb%2F%2F5kAAJkAM5kAZpkAmZkAzJkA%2F5kzAJkzM5kzZpkzmZkzzJkz%2F5lmAJlmM5lmZplmmZlmzJlm%2F5mZAJmZM5mZZpmZmZmZzJmZ%2F5nMAJnMM5nMZpnMmZnMzJnM%2F5n%2FAJn%2FM5n%2FZpn%2FmZn%2FzJn%2F%2F8wAAMwAM8wAZswAmcwAzMwA%2F8wzAMwzM8wzZswzmcwzzMwz%2F8xmAMxmM8xmZsxmmcxmzMxm%2F8yZAMyZM8yZZsyZmcyZzMyZ%2F8zMAMzMM8zMZszMmczMzMzM%2F8z%2FAMz%2FM8z%2FZsz%2Fmcz%2FzMz%2F%2F%2F8AAP8AM%2F8AZv8Amf8AzP8A%2F%2F8zAP8zM%2F8zZv8zmf8zzP8z%2F%2F9mAP9mM%2F9mZv9mmf9mzP9m%2F%2F%2BZAP%2BZM%2F%2BZZv%2BZmf%2BZzP%2BZ%2F%2F%2FMAP%2FMM%2F%2FMZv%2FMmf%2FMzP%2FM%2F%2F%2F%2FAP%2F%2FM%2F%2F%2FZv%2F%2Fmf%2F%2FzP%2F%2F%2FywAAAAABwAHAAAIIwAfPBhAUODABAkWDBi4IGFCgg0TKhzQsOLCAQgVGiS48EFAADs%3D';
-
-    /************************************************************
-     ***                                                       ***
-     ***                       Locales                         ***
-     ***                                                       ***
-     ************************************************************/
-
-    var locales = {
-        "de" : {
-            "updatenotice"              : 'Update vorhanden!\nBitte herunterladen und installieren! Der Downloadlink befindet sich im\nWIMPer-Menu.',
-            "updatereloadnotice"        : 'Nach dem Update bitte die Seite neu laden.\nDanke.',
-            "wimpnotallplantsknown"     : 'Nicht alle PflanzenIDs bekannt.\nBitte den Marktplatz aufsuchen und die ProduktÃ¼bersicht aufrufen.',
-            "wimpnotallcostsknown"      : 'Nicht alle NPC-Preise bekannt.\nBitte die PflanzenÃ¼bersicht in der Hilfe aufrufen.',
-            "market"                    : 'Markt',
-            "questiongetdbupdate"       : 'Daten von der Sammelstelle holen?',
-            "dbupdatemarketrecommend"   : 'Es werden neuere Daten vom Marktplatz empfohlen!',
-            "comesupto"                 : 'Entspricht',
-            "ofthecosts"                : 'der Kosten.',
-            "costs"                     : 'Kosten',
-            "moneyunit"                 : 'wT',
-            "contractcutplants"         : 'Warnung: Gegenst&auml;nde abgek&uuml;rzt!!',
-            "missing"                   : 'Fehlt',
-            "allonstock"                : 'Alles auf Lager',
-            "helpnotallplantsknown"     : 'Nicht alle PflanzenIDs bekannt.\nBitte den Marktplatz aufsuchen und die ProduktÃ¼bersicht aufrufen.\nHast du das schon getan, ignoriere diese Meldung.',
-            "updatelinktitle"           : 'WIMPer Update liegt vor! Hier herunterladen.',
-            "questionshowupdatenotice"  : '(Bei Datenempfang/-versand evtl. Updateinfos anzeigen?)',
-            "costssent"                 : 'WIMPer: Preis gesendet. Danke!',
-            "sendfailed"                : 'WIMPer: Fehler bei der &Uuml;bertragung!',
-            "erroroccured"              : 'Ein Fehler ist aufgetreten!',
-            "helpwelcome"               : 'Herzlich Willkommen in der Hilfe zu WIMPer. Hier erf&auml;hrst du alles, was du im Umgang mit WIMPer wissen musst.',
-            "helpbeginning"             : '<b>Aller Anfang...</b><br>... ist leicht. WIMPer ist so gebaut, dass es auch mit neuen, noch unbekannten Pflanzen arbeiten kann. Deshalb ist es notwendig anfangs einmalig die Produkt&uuml;bersicht auf dem Marktplatz abzurufen, damit WIMPer alle Pflanzen kennenlernt. <br>Anschlie&szlig;end muss WIMPer noch die NPC-Preise f&uuml;r die Pflanzen in Erfahrung bringen. Dies geschieht, indem du hier in der Hilfe die <a href="hilfe.php?item=2">Pflanzenseite</a> abrufst.<br>Diese beiden Schritte sind nur dann erneut notwendig, sollten neue Pflanzen in das Spiel eingef&uuml;gt werden.',
-            "helpmarketplaceoverview"   : '<b>Marktplatz - Produkt&uuml;bersicht</b><br>Hier werden dir Pflanzen, die du bereits einmal abgerufen hast, deren Daten in deiner Datenbank aber momentan veraltet sind, gelb angezeigt. (Diese Option kann in der Konfiguration deaktiviert werden.)',
-            "helpmarketplace"           : '<b>Marktplatz</b><br>Wenn du eine Pflanze im Marktplatz abrufst, wird der Mittelwert der drei g&uuml;nstigsten Angebote gebildet und in deiner Datenbank gespeichert. Zudem werden diese Daten an eine Sammelstelle gesendet, damit andere User nicht immer auf den Marktplatz gehen m&uuml;ssen um die neuesten Preise zu erfahren. Genauso profitierst du von den Preisen von den anderen. Pro Pflanze k&ouml;nnen die Daten nur einmal alle 10 Minuten gesendet werden um den Infoserver nicht zu &uuml;berlasten. (Diese Option kann in der Konfiguration deaktiviert werden.)',
-            "helpwimpinfo"              : '<b>Wimp-Info</b><br>Um schneller erkennen zu k&ouml;nnen, ob alle Pflanzen f&uuml;r den Verkauf an einen Wimp vorhanden sind, wird bei Mausber&uuml;hrung mit dem Wimp nicht nur angezeigt, was er alles kaufen m&ouml;chte, sondern auch, ob du schon alles zusammen hast, oder ob noch etwas fehlt. Dabei werden neuerdings auch die Pflanzen mit einbezogen, die du dir selbst als <b>Vertrag</b> zugesendet hast.<br>Siehst du vor einer ben&ouml;tigten Pflanze das Symbol <img id="wimper_info_contract">, bedeutet das, dass du diese Pflanze noch in einem Vertrag hast, den du aufl&ouml;sen solltest. Zudem zeigt dir das Symbol <img id="wimper_info_market">, dass du noch weitere dieser Pflanzen kaufen, oder anbauen musst.<br><b>-&gt;WICHTIG!&lt;-</b><br>Vertr&auml;ge d&uuml;rfen dabei nicht zu viele Pflanzen enthalten. Enth&auml;lt ein Vertrag so viele Gegenst&auml;nde, dass die Auflistung in der Vertr&auml;ge&uuml;bersicht mit "..." abgek&uuml;rzt wird, k&ouml;nnen die nicht genannten Pflanzen leider nicht erkannt werden!',
-            "helpwimpsale"              : '<b>Wimp-Verkauf</b><br>Willst du etwas an die Wimps verkaufen, siehst du nun zus&auml;tzlich zu der angebotenen Summe auch den Preis, den du auf dem Markt erzielen w&uuml;rdest. Diese sind als Kosten ausgeschildert. Zus&auml;tzlich kannst du die Kosten zu jedem einzelnen Produkt sehen, wenn du mit der Maus &uuml;ber sie f&auml;hrst. &Uuml;ber der Angebotssumme wird bei Mausber&uuml;hrung der prozentuale Wert des Angebot in Relation zu den Kosten angezeigt. &Uuml;bertrifft das Angebot den von dir in der Konfiguration festgelegten Prozentsatz, wird er in lila angezeigt. Ist es h&ouml;her als 100%, erscheint es in gr&uuml;n und ansonsten in rot.',
-            "helpupdate"                : '<b>Aktualisierung</b><br>Solltest du im Angebotsfenster der Wimps sein und deine Marktpreisdaten sind veraltet, gibt es zwei Aktualisierungsm&ouml;glichkeiten.<br>Die Serveraktualisierung wird dir durch einen gr&uuml;nes Symbol hinter dem Angebotsposten dargestellt und kann vollzogen werden, indem du es anklickst. Dabei wird von einer Sammelstelle ein Datensatz heruntergeladen, damit deine Daten auf dem neuesten Stand gehalten werden. Eine Aktualisierung von der Sammelstelle ist pro Server nur jede Stunde m&ouml;glich um den Infoserver nicht zu &uuml;berlasten. (Diese Option kann in der Konfiguration deaktiviert werden.)<br>Die Marktaktualisierung wird dir durch ein rotes Symbol hinter dem Angebotsposten signalisiert. Du siehst sie, wenn deine Daten &auml;lter als eine Stunde sind, ein Sammelstellenupdate aber (noch) nicht in Frage kommt. Dies bedeutet, du solltest im Marktplatz selbst einmal diese Pflanze abrufen, damit die Daten aktualisiert werden, wie oben beschrieben.',
-            "helpcostprotection"        : '<b>Preisschutz</b><br>Die Angebote auf dem Marktplatz, die teurer als auf dem Bauernhof, in der Baumschule oder im Blumenladen sind, werden rot eingef&auml;rbt. (Diese Option kann in der Konfiguration deaktiviert werden.)',
-            "helpgardeninfo"            : '<b>Garten-Info</b><br>&Uuml;ber dem Regal findest du eine Zusammenfassung &uuml;ber den aktuellen Garten. Dabei wird dir angezeigt, wann du deine Pflanzen das n&auml;chste mal w&auml;ssern und ernten musst. Au&szlig;erdem kannst du sehen, wieviele Pl&auml;tze benutzbar sind (kein Unkraut, Stein, ...) und wieviele davon aktuell noch unbenutzt sind.<br>Bewegst du deine Maus &uuml;ber eine dieser Informationen, werden die betreffenden Felder gelb angezeigt, so dass du sie schnell finden kannst. Bei der Anzeige der zu gie&szlig;enden und erntenden Felder wird ein Zeitfenster von 5 Minuten einbezogen.',
-            "helpconfig"                : '<b>Konfiguration</b><br>Du kannst WIMPer einstellen. So kann eingestellt werden, ob Daten an den Infoserver gesendet werden, oder von dort empfangen werden. Zudem kannst du die Einf&auml;rbung der Pflanzen auf dem Marktplatz und in der Produkt&uuml;bersicht an-/abstellen. Zudem kannst du einstellen, ob du bei einem stattfindenden Datentransfer informiert werden m&ouml;chtest, wenn es von WIMPer ein Update gibt. Als weiteres kannst du eine Angebotsschwelle als Prozentsatz festlegen, ab dem das Angebot farblich lila gekenneichnet wird. Die Konfiguration siehst du, wenn du neben dem Logout-Button auf <img id="wimper_button"> klickst.',
-            "helpupdatelink"            : '<b>Updatelink</b><br>Wie oben geschrieben, kannst du in der Konfiguration die Information &uuml;ber existierende Updates an- bzw abstellen. In jedem Falle wird der Downloadlink im Konfigurationsfenster angezeigt.',
-            "configwelcome"             : 'Hier kannst du WIMPer einstellen.',
-            "version"                   : 'Version',
-            "configwarning"             : 'Du benutzt WIMPer damit auf eigene Gefahr.',
-            "configdiscussionlink"      : 'Bitte &auml;u&szlig;ert Verbesserungsideen <a href="http://userscripts.org/scripts/discuss/40956" target="_blank">hier</a>.',
-            "configdownload"            : 'Download',
-            "configdownloadquestion"    : '(Daten herunterladen anbieten?)',
-            "configupload"              : 'Upload',
-            "configuploadquestion"      : '(Preise versenden?)',
-            "configwimpoffer"           : 'Gutes Angebot',
-            "configwimpoffernotice"     : 'Angebot durch Kosten in %',
-            "configwimpoffertitle"      : 'Zeigt das Angebot des Wimps in lila an, wenn dieser Prozentsatz erreicht wird.',
-            "configcolorlinks"          : 'Links einf&auml;rben',
-            "configcolorlinkstitle"     : 'Gilt nur f&uuml;r Pflanzen, die bereits einmal auf dem Marktplatz abgerufen worden sind.',
-            "configcolorlinksnotice"    : '(Marktplatz: Farbe f&uuml;r veraltete Daten in Produkt&uuml;bersicht)',
-            "configmarkoverprice"       : 'Preise markieren',
-            "configmarkoverpricenotice" : '(Marktplatz: Preise gr&ouml;&szlig;er als NPC-Preis markieren)',
-            "configupdateinfo"          : 'Update-Info',
-            "configsubmitbutton"        : '&Auml;nderungen speichern',
-            "infonow"                   : 'jetzt',
-            "infowater"                 : 'w&auml;ssern',
-            "infoharvest"               : 'ernten',
-            "infousable"                : 'nutzbar',
-            "infounused"                : 'unbenutzt',
-            "actualupdatenotice"        : 'WIMPer wurde aktualisiert!\nEs wurden Veränderungen an der Kompatibilität vorgenommen. So sollte das Infofeld des Zwerges im oberen Banner die Anzeigefunktionen des Scriptes nicht mehr behindern. Das Hintergrundbild des Konfigurationsfenster wird auch ohne GFX-Paket wieder angezeigt.\n\nBitte äußere Verbesserungsideen im Diskussionsforum. Den Link findest du im WIMPermenu.'
-        },
-        "pl" : {
-            "updatenotice"              : 'Mozliwa jest aktualizacja!\nPobierz i zainstaluj! Linka znajdziesz w menu WIMPera. ',
-            "updatereloadnotice"        : 'Po aktualizacji odswiez strone.\nDziekuje.',
-            "wimpnotallplantsknown"     : 'Nie sa znane wszystkie dane roslin.\nOdwiedz targ aby pozyskac nazwy.',
-            "wimpnotallcostsknown"      : 'Nie sa znane wszystkie ceny roslin u NPC.\nOdwiedz strone Rosliny\nw menu Pomoc.\nDziekuje.',
-            "market"                    : 'Targ',
-            "questiongetdbupdate"       : 'Pobrac dane z serwera?',
-            "dbupdatemarketrecommend"   : 'Zalecana jest aktualizacja cen!',
-            "comesupto"                 : 'Wartosc oferty to',
-            "ofthecosts"                : 'kosztów.',
-            "costs"                     : 'Suma',
-            "moneyunit"                 : 'kt',
-            "contractcutplants"         : 'Uwaga nazwa rosliny jest niepelna!!',
-            "missing"                   : 'Brakuje',
-            "allonstock"                : 'Wszystko w magazynie',
-            "helpnotallplantsknown"     : 'Nie sa znane wszystkie dane roslin.\nOdwiedz targ aby pozyskac nazwy.\nJesli juz to zrobiles to zignoruj ten komunikat.',
-            "updatelinktitle"           : 'Dostepna jest aktualizacja! Pobierz tutaj!',
-            "questionshowupdatenotice"  : '(Pokazac informacje podczas wysylania/odbierania danych na serwer?)',
-            "costssent"                 : 'WIMPer: Cena wyslana na serwer. Dziekuje!',
-            "sendfailed"                : 'WIMPer: Wysylanie ceny na serwer nie powiodlo sie!',
-            "erroroccured"              : 'Blad!',
-            "helpwelcome"               : 'Witam w pomocy WIMPera. Tutaj znajdziesz wszystkie informacje dotyczace obslugi WIMPera.',
-            "helpbeginning"             : '<b>Pierwsze kroki...</b><br>... sa proste. WIMPer jest tak zaprogramowany, ze dziala z produktami, które nie sa mu jeszcze znane. Dlatego musisz najpierw odwiedzic targ i wybrac kazdy produkt aby WIMPer pozyskal jego nazwe i cene. <br>Nastepnie musisz otworzyc <a href="hilfe.php?item=2">strone dotyczaca Roslin</a> w Pomocy gry aby WIMPer mógl pobrac ceny roslin u NPC.<br>Ten ostatni krok trzeba powtórzyc tylko gdy zostana dodane do gry nowe rosliny.',
-            "helpmarketplaceoverview"   : '<b>Targ - Przeglad produktów</b><br>Wszystkie rosliny, których ceny sa nieaktualne zaznaczone sa na zólto. (Ta opcje mozna wylaczyc w menu WIMPera).',
-            "helpmarketplace"           : '<b>Targ</b><br>Kiedykolwiek odwiedzisz strone jakiejs rosliny na targu, zostanie obliczona srednia z trzech najnizszych cen danej rosliny, a nastepnie zapisana w bazie danych WIMPera. Dodatkowo te dane zostana wyslane do serwera wiec inni uzytkownicy WIMPera beda mogli pozyskac te dane bez odwiedzania targu. Równiez i ty mozesz korzystac z tego, iz inni wysylaja dane na serwer. Dane kazdej roslin moga byc aktualizowane raz na 10 minut zeby zapobiec przeciazeniu serwera. (Ta opcja moze byc wylaczona w menu WIMPera).',
-            "helpwimpinfo"              : '<b>Wimp – okienko informacji</b><br>Gdy najedziesz kursorem na postac Wimpa, wyswietli sie okienko informacji, w którym dowiesz sie czy masz juz wszystkie potrzebne rosliny czy moze jeszcze potrzebujesz niektórych roslin. Jesli nie bedzie w magazynie wszystkich potrzebnych roslin w okienku wyswietla sie nazwy tych roslin, których brakuje. W obliczeniu ilosci posiadanych roslin brane sa pod uwage rosliny w magazynie jak i te, które zostaly przyslane w umowie np. do siebie (oszczednosc miejsca w magazynie). Aby WIMPer wliczyl rosliny z umowy wystarczy wejsc do menu Umowy, a jesli bedziemy chcieli skorzystac z tych zapasów wystarczy anulowac umowe wyslana do siebie. <br><b>-&gt;WAZNE&lt;-</b><br>Umowy zawierajace wiele roslin moga byc zle rozpoznawane przez WIMPera i te rosliny moga nie zostac wliczone w kalkulacje.',
-            "helpwimpsale"              : '<b>Sprzedaz do Wimpa</b><br>Jesli chcesz sprzedac Wimpowi produkty i otworzysz okienko z jego oferta zobaczysz tam informacje jaki bylby koszt sprzedazy tych produktów na targu (kwota nizej) w porównaniu do oferty pienieznej Wimpa (kwota wyzej). Dodatkowo mozesz zobaczyc wartosc kazdej rosliny z osobna najezdzajac kursorem na nia. Przesuwajac kursor na kwote oferty Wimpa pojawi sie procentowa wartosc oferty Wimpa w porównaniu do wartosci roslin na targu. Jesli ta wartosc procentowa jest wyzsza niz ta, która ustawiono w menu bedzie ona wyswietlana fioletowym kolorem. Poza tym jesli ta wartosc bedzie okolo 100% to kolor bedzie zielony, a jesli bedzie ponizej ustawionej wartosci procentowej kolor bedzie czerwony.',
-            "helpupdate"                : '<b>Aktualizacja cen</b><br>Jesli masz otwarta oferte Wimpa i cena rosliny jest nieaktualna mozesz skorzystac z opcji aktualizacji cen.<br>Aktualizacja cen poprzez pobranie danych z serwera jest dostepna pod zielonym przyciskiem obok nazwy rosliny w ofercie Wimpa. Aktualizacja w ten sposób jest mozliwa raz na godzine na kazdy serwer zeby zapobiec przeciazeniu serwera. (Ta opcja moze zostac wylaczona w menu).<br>Czerwony przycisk obok nazwy rosliny oznacza ze cena jest nieaktualna, a aktualizacja poprzez serwer jest niedostepna (jeszcze). To oznacza ze nalezy dokonac aktualizacji cen poprzez wizyte na targu i wyboru odpowiednich roslin.',
-            "helpcostprotection"        : '<b>Ochrona przed wysokimi cenami</b><br>Oferty roslin na targu ktorych ceny sa wyzsze niz ceny u NPC sa zaznaczane na czerwono. (Ta opcje mozna wylaczyc w menu).',
-            "helpconfig"                : '<b>Konfiguracja</b><br>Mozesz konfigurowac WIMPera. Mozesz decydowac czy dane maja byc wysylane na serwer. Równiez jest mozliwosc wlaczenia/wylaczenia opcji wyswietlania na targu zóltym kolorem roslin których ceny sa nieaktualne. Mozesz ustawic czy chcesz byc informowany o dostepnosci aktualizacji WIMPera jak równiez informacje dotyczace trasnferu danych na serwer. Menu konfiguracji mozesz otworzyc klikajac przycisk <img id="wimper_button"> który jest obok przycisku Wylogowania.',
-            "helpupdatelink"            : '<b>Aktualizacje</b><br>Jak bylo wspomniane powyzej - mozesz zdecydowac czy informacje o aktualizacji maja byc wyswietlane. Niezaleznie od ustawien link do aktualizacji zawsze bedzie dostepny w menu.',
-            "configwelcome"             : 'Tutaj mozesz ustawic WIMPera.',
-            "version"                   : 'Wersja',
-            "configwarning"             : 'Uzywasz WIMPera na wlasna odpowiedzialnosc.',
-            "configdiscussionlink"      : 'Jesli masz pomysly jak ulepszyc WIMPera kliknij <a href="http://userscripts.org/scripts/discuss/40956" target="_blank">tutaj</a>.',
-            "configdownload"            : 'Pobieranie',
-            "configdownloadquestion"    : '(Pobierac dane z serwera?)',
-            "configupload"              : 'Wysylanie',
-            "configuploadquestion"      : '(Wysylac dane na serwer?)',
-            "configwimpoffer"           : 'Korzystne oferty',
-            "configwimpoffernotice"     : 'relacja: oferta do kosztów w %',
-            "configwimpoffertitle"      : 'Oferta zostanie wyswietlona fioletowym kolorem jesli zajdzie ta relacja.',
-            "configcolorlinks"          : 'Nieaktualne ceny',
-            "configcolorlinkstitle"     : 'Dziala tylko dla tych produktów których cena byla chociaz jeden raz pobrana!',
-            "configcolorlinksnotice"    : '(Targ: zaznaczanie na zólto roslin z nieaktualnymi cenami)',
-            "configmarkoverprice"       : 'Wysokie ceny',
-            "configmarkoverpricenotice" : '(Targ: zaznaczanie cen roslin wyzszych niz u NPC)',
-            "configupdateinfo"          : 'Informacje',
-            "configsubmitbutton"        : 'Zapisz zmiany',
-            "infowater"                 : 'podley',
-            "infoharvest"               : 'zbierz plony'
-        },
-        "hu" : {
-            "updatenotice"              : 'Letöltheto frissítés!\nTöltsd le, és telepítsd! A letöltési link a WIMPer\' menüjében van.',
-            "updatereloadnotice"        : 'Miután a frissítés végzett tölsd be újra az oldalt.\nKöszönöm.',
-            "wimpnotallplantsknown"     : 'Bizonyos növények ismeretlenek.\nLátogasd meg a piacot, és nyisd meg a növényenként az ajánlatokat.',
-            "wimpnotallcostsknown"      : 'Bizonyos növények bolti ára ismeretlen.\nKérlek nyisd meg a Súgó-ban a növények lapját.\nKöszönöm.',
-            "market"                    : 'piac',
-            "questiongetdbupdate"       : 'Adatletöltés a szerverrol?',
-            "dbupdatemarketrecommend"   : 'Ajánlatos a piaci árak frissítése.',
-            "comesupto"                 : 'A felkínált ár',
-            "ofthecosts"                : '-a a piaci értéknek.',
-            "costs"                     : 'Piaci érték',
-            "moneyunit"                 : 'gyT',
-            "contractcutplants"         : 'Figyelem: az objektum nevek csonkolva!!',
-            "missing"                   : 'hiányzik',
-            "allonstock"                : 'Minden növény rendelkezésre áll',
-            "helpnotallplantsknown"     : 'Bizonyos növények ismeretlenek.\nLátogasd meg a piacot, és nyisd meg a növényenként az ajánlatokat.\nHa ezt már megtetted,\nhagyd figyelmen kívül ezt az üzenetet.',
-            "updatelinktitle"           : 'WIMPer frissítés elérheto! Töltsd le itt!',
-            "questionshowupdatenotice"  : '(Megjelenjen a frissítési információ az árak feltöltésekor?)',
-            "costssent"                 : 'WIMPer: Az ár frissítve. Köszönjük!',
-            "sendfailed"                : 'WIMPer: Ár küldése sikertelen!',
-            "erroroccured"              : 'Hiba történt!',
-            "helpwelcome"               : 'Üdvözöl a WIMPer\' súgó. Itt mindent megtalálsz ami szükséges, hogy használhasd a WIMPer-t.',
-            "helpbeginning"             : '<b>Az elso lépések...</b><br>... a legkönnyebbek. WIMPer úgy lett programozva, hogy azokat a növényeket is kezeli, melyeket korábban nem ismert. Indulásként el kell látogatnod a piacra a termék listára, hogy a WIMPer megismerhesse a terményeket. Azután meg kell nyitnod a <a href="hilfe.php?item=2">növények súgó oldalt</a> hogy a WIMPer betöltse a növények bolti árát. Ezt csak akkor kell újra végrehajtani ha új növény kerül bevezetésre.',
-            "helpmarketplaceoverview"   : '<b>Piac – termék lista</b><br>Ezen az oldalon azon növények neve melyek ára nincs frissítve sárgával jelenik meg. (Ez az opció letiltható a beállító menüben.)',
-            "helpmarketplace"           : '<b>Piac - árak</b><br>Valahányszor a piacon megnyitod egy növény oldalát a WIMPer kiszámítja a legolcsóbb három ajánlat átlagos árát, és elmenti a Te helyi adatbázisodba. Ez az adatot a WIMPer elküldi egy szervernek, mely gyujti az adatokat, így nem kell mindenkinek meglátogatnia a piacot, hogy a legfrissebb árakat megkaphassák. Cserébe Te is megkapod az árakat, amit mások töltöttek fel. Minden növény adatai 10 percenként csak egyszer tölthetok fel, hogy elkerülheto legyen a szerver túlterhelése. (Ez az opció letiltható a beállító menüben.)',
-            "helpwimpinfo"              : '<b>Vásárló-infó</b><br>Valahányszor az egeret egy vásárló felett húzod át a WIMPer kiírja, hogy készelet van-e minden kívánt növény, vagy nem. Új képesség, hogy információt ad azokról a növényekrol, melyeket szerzodésben küldted el magadnak. <br>Ez a szimbólum: <img id="wimper_info_contract"> jelzi, hogy egy szerzodésed van, melyet vissza kell vonnod. Egy másik szimbólum: <img id="wimper_info_market"> azt jelzi, hogy nincs elegendo készleted a növénybol.<br><b>-&gt;FONTOS&lt;-</b><br>A szerzodésekben nem lehet túl sok fajta növény. Ha túl sokféle növény szerepel egy szerzodésben akkor a címében csak ennyi szerepel "...", és az itt fel nem sorolt termékeket nem veszi figyelembe a kalkuláció. Egy figyelmeztetés jelenik meg, ha ilyen szerzodés található.',
-            "helpwimpsale"              : '<b>Vásárlónak történo eladás</b><br>Ha üzletelni akarsz a vásárlóval, és rákattintasz, a vásárló ajánlata alatt megkapod azt a kiegészíto információt mennyit keresnél a termékekkel, ha a piacon adnád el. Ezt „költség”-ként írja ki. Ezen kívül láthatod minden termék piaci értékét ha az egeret a listában fölé húzod. Ha az egeret a vevo ajánlata fölé húzod megkapod az ajánlat százalékos viszonyítását a piaci értékhez. Ha ez a százalékos érték magasabb mint amit a beállító menüben megadtál, az ajánlat színe lila lesz. Ha ez az érték magasabb 100%-nál, a szin zöld lesz, ha egyiket sem éri el akkor vörös.',
-            "helpupdate"                : '<b>Árak frissítése</b><br>H megnyitottad a vásárló ajánlatát, és a növény adatai nem frissek, két módon lehet frissíteni.<br>Az adatok frissíthetoek a szerverrol való letöltéssel. Csak rá kell kattintani a növény neve melletti zöld szimbólumra. Ezen a módon való frissítés csak egyszer hajtható végre óránként, hogy az adatgyujto szerver ne legyen túlterhelt. (Ez az opció letiltható a beállító menüben.)<br> A növények neve mellett vörös szimbólum látható, ha az adata már nem friss, és az adatgyujto szerverrol történo frissítés nem lehetséges. Ekkor meg kell látogatnod a piacot, hogy a fentebb leírt módon kaphasd meg a legfrissebb árakat.',
-            "helpcostprotection"        : '<b>Túlfizetés védelem</b><br>Olykor a piaci ajánlatok drágábbak a bolti áraknál. Ezek az ajánlatok piros színnel jelennek meg. (Ez az opció letiltható a beállító menüben.)',
-            "helpgardeninfo"            : '<b>Kert-infó</b><br>Az aktuális kert összesíto információja a polc felett a bal szélen jelenik meg. Itt láthatod, mikor kell öntözni, és betakarítani a növényeket. Ettol jobbra találod hány mezonyi hely használható, és pillanatnyilag mennyi kihasználatlan.',
-            "helpconfig"                : '<b>Beállító menü</b><br>A WIMPer beállító menüjében szabályozható, küldjél illetve fogadjál-e adatokat a szerver irányában. Továbbá engedélyezheted, vagy tilthatod a növények színezését a piaci áttekinto listán. Eldöntheted, akarsz-e információt kapni a WIMPer frissítéseirol mikor adatot küldesz a szervernek. Kattints a jelre: <img id="wimper_button"> a kijelentkezo gomb mellett a beállító menü megnyitásához.',
-            "helpupdatelink"            : '<b>Frissítés link</b><br>Mint fentebb említettük, eldöntheted, hogy a WIMPer frissítési információk megjelenjenek-e, ettol függetlenul a Beállítási képernyon a link megjelenik.',
-            "configwelcome"             : 'A WIMPer beállító oldala.',
-            "version"                   : 'verzió',
-            "configwarning"             : 'A WIMPer-t csak saját feleloségedre használhatod!!',
-            "configdiscussionlink"      : 'Kérlek, a fejlesztési ötleteidet ide küldjed <a href="http://userscripts.org/scripts/discuss/40956" target="_blank">IDE</a>.',
-            "configdownload"            : 'letöltés',
-            "configdownloadquestion"    : '(ajánlat adatok letöltése?)',
-            "configupload"              : 'feltöltés',
-            "configuploadquestion"      : '(ár adatok feltöltése?)',
-            "configwimpoffer"           : 'jó ajánlat',
-            "configwimpoffernotice"     : 'viszonyítás: ajánlat a piaci érték %-ában',
-            "configwimpoffertitle"      : 'Az ajánlat lilára színezodik, ha az arány eléri a megadott szintet',
-            "configcolorlinks"          : 'linkek átszinezése',
-            "configcolorlinkstitle"     : 'Csak a már legalább egyszer megtekintett növényekre vonatkozik.',
-            "configcolorlinksnotice"    : '(Piac: a frissítést igénylo növények nevének színezése az áttekinto listán)',
-            "configmarkoverprice"       : 'túlfizetés jelzés',
-            "configmarkoverpricenotice" : '(Piac: a boltinál magasabb árak színezése)',
-            "configupdateinfo"          : 'WIMPer frissítés',
-            "configsubmitbutton"        : 'változások mentése',
-            "infonow"                   : 'most',
-            "infowater"                 : 'öntözés',
-            "infoharvest"               : 'aratás',
-            "infousable"                : 'muvelheto',
-            "infounused"                : 'üres'
-        },
-        "com" : {
-            "updatenotice"              : 'Update available!\nPlease download and install! A link to the download can be found at WIMPer\'s menu.',
-            "updatereloadnotice"        : 'After update finishes please reload site.\nThank you.',
-            "wimpnotallplantsknown"     : 'Some plant IDs are unknown.\nPlease visit the marketplace and click on the product overview.',
-            "wimpnotallcostsknown"      : 'The NPC\'s costs of some plants are unknown.\nPlease visit the plant\'s page ofthe game\'s help.\nThank you.',
-            "market"                    : 'market',
-            "questiongetdbupdate"       : 'Download data from server?',
-            "dbupdatemarketrecommend"   : 'It is recommended to get more recent prices from the marketplace.',
-            "comesupto"                 : 'Comes up to',
-            "ofthecosts"                : 'of the costs.',
-            "costs"                     : 'costs',
-            "moneyunit"                 : 'gB',
-            "contractcutplants"         : 'Warning: the names of the objects are cut!!',
-            "missing"                   : 'missing',
-            "allonstock"                : 'everything on stock',
-            "helpnotallplantsknown"     : 'Some plant IDs are unknown.\nPlease visit the marketplace and click on the product overview.\nIf you have done so already,\nplease ignore this message.',
-            "updatelinktitle"           : 'WIMPer update available! Download here!',
-            "questionshowupdatenotice"  : '(Show update info while sending/retrieving price data?)',
-            "costssent"                 : 'WIMPer: Price sent. Thank you!',
-            "sendfailed"                : 'WIMPer: Sending price failed!',
-            "erroroccured"              : 'An error occured!',
-            "helpwelcome"               : 'Welcome to WIMPer\'s help. Here you can find information on everything you need to know in order to use WIMPer.',
-            "helpbeginning"             : '<b>The first steps...</b><br>... are the easiest. WIMPer is programmed to be compatible even with plants that have not been designed, yet. For a starter it is required that you visit the product overview in the marketplace so that WIMPer can retrieve the IDs of the plants. After this you need to open <a href="hilfe.php?item=2">the plant\'s help page</a> to retrieve the NPC prices of the plants. You only need to repeat these steps if new plants are introduced.',
-            "helpmarketplaceoverview"   : '<b>marketplace - product overview</b><br>On this page the names of the plants whose data is outdated is shown in yellow. (This option can be disabled in the configuration menu.)',
-            "helpmarketplace"           : '<b>marketplace</b><br>Whenever you visit the page of a plant at the marketplace WIMPer calculates the average price of the three cheapest offers and saves it to your local database. This data is then sent to a server that collects data so others do not need to visit the marketplace to get the most up-to-date prices. In return you can profit of prices that have been uploaded by other users. The data of each plant can only be uploaded once every 10 minutes to avoid an overload of the server. (This option can be disabled in the configuration menu.)',
-            "helpwimpinfo"              : '<b>wimp-info</b><br>Whenever you mouse moves over a wimp, WIMPer will tell you whether you have every plant in stock or not. A new feature includes information on plants that you might have sent to yourself with a contract to calculate whether there are enough plants in your stock.<br>The symbol <img id="wimper_info_contract"> indicates there is a contract you need to cancel. Another symbol <img id="wimper_info_market"> tells you to either plant or grow additional plants.<br><b>-&gt;IMPORTANT&lt;-</b><br>Contracts must not contain too many different plants. If there are to many plants in a contract, so that the subject uses a "...", the plants not mentioned will not be considered in the calculation. A warning will be shown in case such a contract is found.',
-            "helpwimpsale"              : '<b>sale to a wimp</b><br>If you want to make a deal with a wimp and click on him/her, you get information on how much money you would earn if you sold these plants at the marketplace in addion to the wimp\'s offer. These are marked as costs. Additionally you can see each the costs of the products if you move your mouse over them. By moving your mouse over the wimp\'s offer you will get percental value of the offer in relation to the costs. If that percentual value is higher than the value you have set in the configuration its color will be purple. If that value is higher than 100% the color will be green and if neither is reached the color will be red.',
-            "helpupdate"                : '<b>Updating Prices</b><br>If you have opened a wimp\'s offer and the data of your plants is outdated, there are two options for an update.<br>You can get an update by downloading data from the server. Just click the green symbol behind the products. An update by using this method is available only once an hour so that the server server collecting the data is not overloaded. (This option can be disabled at the configuration menu.)<br>There is a red symbol behind the products whose data is outdated and if an update using the collecting server is not available (yet). This means you have visit the marketplace to get the most up-to-date prices by yourself like mentioned above.',
-            "helpcostprotection"        : '<b>Overprice protection</b><br>Sometimes offers at the marketplace are more expensive than at the NPC stores. Those offers are marked red. (This option can be disabled at the configuration menu.)',
-            "helpgardeninfo"            : '<b>garden-info</b><br>A summary about the actual garden is displayed above the rack to the left. Here you can find information on when to water and to harvest your plants. Right next to this you can see how many fields are available for use and how many are actually unused.<br>Moving your cursor over one of these information will highlight the specific fields. This way you can easily find the fields you need to work on. The highlighting of plants to water or to harvest there is a time range of 5 minutes including all fields within that range.',
-            "helpconfig"                : '<b>configuration</b><br>You can choose WIMPer\'s setup. It is you who decides whether to send or retrieve the server or not. You can also enable or disable the coloration of the plants at the product overview of the marketplace. You can decide whether you want to be informed about updates of WIMPer while transfering data to the server. Click on the <img id="wimper_button"> next to the logout-button to open the configuration menu.',
-            "helpupdatelink"            : '<b>update link</b><br>As mentioned above you can decide whether update information should be displayed. Indepentendly a link to the update will be shown in the configuration menu.',
-            "configwelcome"             : 'You can setup WIMPer here.',
-            "version"                   : 'version',
-            "configwarning"             : 'You are using WIMPer at your own risk.',
-            "configdiscussionlink"      : 'Please post ideas of possible improvement <a href="http://userscripts.org/scripts/discuss/40956" target="_blank">here</a>.',
-            "configdownload"            : 'download',
-            "configdownloadquestion"    : '(offer data download?)',
-            "configupload"              : 'upload',
-            "configuploadquestion"      : '(upload price data?)',
-            "configwimpoffer"           : 'good offer',
-            "configwimpoffernotice"     : 'relation: offer to costs in %',
-            "configwimpoffertitle"      : 'the offer will be colored purple if this relation reached or surpassed',
-            "configcolorlinks"          : 'color links',
-            "configcolorlinkstitle"     : 'Only counts for plants visited at the marketplace at least once.',
-            "configcolorlinksnotice"    : '(marketplace: colors outdated plants at the product overview)',
-            "configmarkoverprice"       : 'mark overprice',
-            "configmarkoverpricenotice" : '(marketplace: colors prices higher than the NPC\'s price)',
-            "configupdateinfo"          : 'update info',
-            "configsubmitbutton"        : 'save changes',
-            "infonow"                   : 'now',
-            "infowater"                 : 'water',
-            "infoharvest"               : 'harvest',
-            "infousable"                : 'usable',
-            "infounused"                : 'unused',
-            "actualupdatenotice"        : 'WIMPer has been updated!\nRecent changes have been made to provide compatibility with actual versions of molehillempire. The information field on top should no longer overlay the script\'s highlight functions. The routine for finding the GFX-link was updated so the background image of WIMPer\'s configuration window should be back.\n\nIf you are interested in supplying a translation for your language, use the script\'s forum. The link can be found at WIMPer\'s config menu. Please join in there for any suggestions, too.'
-        }
-    }
-
-    locale = (locales[country] != null) ? locales[country] : locales["com"];
-    for(actLocData in locales["com"]) {
-        if(locale[actLocData] == null) locale[actLocData] = locales["com"][actLocData];
-    }
-    delete locales;
 
     var ver = 1.0, prot="Gurke";
 
